@@ -10,7 +10,7 @@ class CacaoService {
     String token = prefs.getString('token').toString();
 
     final response = await http.get(
-      Uri.parse('$baseUrl/farms'),
+      Uri.parse('$baseUrl/farms/cacao-trees'),
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -30,7 +30,7 @@ class CacaoService {
     String token = prefs.getString('token').toString();
 
     final response =  await http.post(
-      Uri.parse('$baseUrl/farms'),
+      Uri.parse('$baseUrl/farms/cacao-trees'),
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -50,7 +50,7 @@ class CacaoService {
     String token = prefs.getString('token').toString();
 
     final response = await http.put(
-      Uri.parse("$baseUrl/farms/${cacao.farmId.toString()}"),
+      Uri.parse("$baseUrl/farms/${cacao.farm_id.toString()}"),
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -70,7 +70,7 @@ class CacaoService {
     String token = prefs.getString('token').toString();
 
     final response = await http.delete(
-      Uri.parse("$baseUrl/farms/$id"),
+      Uri.parse("$baseUrl/farms/cacao-trees/$id"),
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",

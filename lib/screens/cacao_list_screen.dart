@@ -91,7 +91,7 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
                 final cacao = cacaos[index];
                 return ListTile(
                   title: Text(cacao.variety ?? 'Unknown Variety'),
-                  subtitle: Text('Block: ${cacao.blockName ?? 'N/A'}'),
+                  subtitle: Text('Block: ${cacao.block_name ?? 'N/A'}'),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [

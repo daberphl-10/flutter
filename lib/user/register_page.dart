@@ -41,7 +41,7 @@ class _RegisterPageState extends State<RegisterPage> {
       if (success && mounted) {
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (context) => const ProgramListScreen()),
+          MaterialPageRoute(builder: (context) => const FarmListScreen()),
         );
       } else if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

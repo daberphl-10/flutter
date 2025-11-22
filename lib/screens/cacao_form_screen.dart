@@ -25,11 +25,11 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
   void initState() {
     super.initState();
     if (widget.cacao != null) {
-      _blockNameController.text = widget.cacao!.blockName ?? '';
-      _treeCountController.text = widget.cacao!.treeCount ?? '';
+      _blockNameController.text = widget.cacao!.block_name ?? '';
+      _treeCountController.text = widget.cacao!.tree_count?.toString() ?? '';
       _varietyController.text = widget.cacao!.variety ?? '';
-      _plantingDateController.text = widget.cacao!.plantingDate ?? '';
-      _growthStageController.text = widget.cacao!.growthStage ?? '';
+      _plantingDateController.text = widget.cacao!.date_planted?.toIso8601String().split('T').first ?? '';
+      _growthStageController.text = widget.cacao!.growth_stage ?? '';
       _statusController.text = widget.cacao!.status ?? '';
     }
   }
@@ -54,11 +54,11 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
 
     try {
       final cacao = Cacao(
-        blockName: _blockNameController.text.trim(),
-        treeCount: _treeCountController.text.trim(),
+        block_name: _blockNameController.text.trim(),
+        tree_count: int.parse(_treeCountController.text.trim()),
         variety: _varietyController.text.trim(),
-        plantingDate: _plantingDateController.text.trim(),
-        growthStage: _growthStageController.text.trim(),
+        date_planted: DateTime.parse(_plantingDateController.text.trim()),
+        growth_stage: _growthStageController.text.trim(),
         status: _statusController.text.trim(),
       );
 
@@ -101,15 +101,14 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.cacao == null ? 'Add Cacao' : 'Edit Cacao'),
-        actions: [
-          if (_isLoading) 
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: Center(child: CircularProgressIndicator()),
-          ),
-        ]
-      ),
+          title: Text(widget.cacao == null ? 'Add Cacao' : 'Edit Cacao'),
+          actions: [
+            if (_isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+          ]),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -118,9 +117,8 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
             children: [
               TextFormField(
                 controller: _blockNameController,
-                decoration: const InputDecoration(
-                  labelText: 'Block Name'),
-                  validator: (value) {
+                decoration: const InputDecoration(labelText: 'Block Name'),
+                validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter Block Name';
                   }
@@ -130,11 +128,9 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
               ),
               TextFormField(
                 controller: _treeCountController,
-                decoration: const InputDecoration(
-                  labelText: 'Tree Count'),
+                decoration: const InputDecoration(labelText: 'Tree Count'),
                 enabled: !_isLoading,
               ),
-
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: _isLoading ? null : _saveCacao,

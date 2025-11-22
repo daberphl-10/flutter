@@ -8,28 +8,27 @@ class ApiService {
   // static const String baseUrl = "http://188.1.0.244:8000/api/programs";
   // static const String baseUrl = "http://localhost:8000/api/program";
 
-  static Future<List<Program>> getPrograms() async {
+  static Future<List<Farm>> getFarms() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
 
-      final SharedPreferences prefs = await SharedPreferences.getInstance();
-      String token = prefs.getString('token').toString();
-
-    final response = await http.get(Uri.parse('$baseUrl/farms'), 
-    headers: {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      'Authorization': 'Bearer $token',
-    });
+    final response = await http.get(Uri.parse('$baseUrl/farms'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        });
 
     if (response.statusCode == 200) {
       // print(response.body);
       final List data = jsonDecode(response.body)["data"];
-      return data.map((e) => Program.fromJson(e)).toList();
+      return data.map((e) => Farm.fromJson(e)).toList();
     } else {
       throw Exception('Failed to load programs');
     }
   }
 
-  static Future<Program> createProgram(Program program) async {
+  static Future<Farm> createFarm(Farm farm) async {
 
      final SharedPreferences prefs = await SharedPreferences.getInstance();
     String token = prefs.getString('token').toString();
@@ -40,18 +39,18 @@ class ApiService {
         'Accept': 'application/json',
         'Authorization': 'Bearer $token',
       },
-      body: jsonEncode(program.toJson()),
+      body: jsonEncode(farm.toJson()),
     );
 
     if (response.statusCode == 201) {
       final data = jsonDecode(response.body)["data"];
-      return Program.fromJson(data);
+      return Farm.fromJson(data);
     } else {
-      throw Exception('Failed to create program');
+      throw Exception('Failed to create farm');
     }
   }
 
-  static Future<Program> updateProgram(Farms farm) async {
+  static Future<Farm> updateFarm(Farm farm) async {
      final SharedPreferences prefs = await SharedPreferences.getInstance();
     String token = prefs.getString('token').toString();
 
@@ -67,13 +66,13 @@ class ApiService {
 
     if (response.statusCode == 200) {
       final data = jsonDecode(response.body)["data"];
-      return Program.fromJson(data);
+      return Farm.fromJson(data);
     } else {
       throw Exception('Failed to update program');
     }
   }
 
-  static Future<void> deleteProgram(int id) async {
+  static Future<void> deleteFarm(int id) async {
 
      final SharedPreferences prefs = await SharedPreferences.getInstance();
     String token = prefs.getString('token').toString();
@@ -86,7 +85,7 @@ class ApiService {
     });
 
     if (response.statusCode != 200 && response.statusCode != 204) {
-      throw Exception('Failed to delete program');
+      throw Exception('Failed to delete farm');
     }
   }
 }

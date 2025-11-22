@@ -13,7 +13,7 @@ class _DashboardWrapperState extends State<DashboardWrapper> {
   int _selectedIndex = 0;
 
   static const List<Widget> _screens = <Widget>[
-    ProgramListScreen(),
+    FarmListScreen(),
     CacaoListScreen(),
   ];
 

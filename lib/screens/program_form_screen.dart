@@ -2,16 +2,16 @@ import 'package:flutter/material.dart';
 import '../models/program.dart';
 import '../services/api_service.dart';
 
-class ProgramFormScreen extends StatefulWidget {
-  final Program? program; // null for create, Program for edit
+class FarmFormScreen extends StatefulWidget {
+  final Farm? farm; // null for create, Farm for edit
 
-  const ProgramFormScreen({super.key, this.program});
+  const FarmFormScreen({super.key, this.farm});
 
   @override
-  State<ProgramFormScreen> createState() => _ProgramFormScreenState();
+  State<FarmFormScreen> createState() => _FarmFormScreenState();
 }
 
-class _ProgramFormScreenState extends State<ProgramFormScreen> {
+class _FarmFormScreenState extends State<FarmFormScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _locationController = TextEditingController();
@@ -25,13 +25,14 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
   @override
   void initState() {
     super.initState();
-    if (widget.program != null) {
-      _nameController.text = widget.program!.name ?? '';
-      _locationController.text = widget.program!.location ?? '' ;
-      _latitudeController.text = widget.program!.latitude.toString();
-      _longitudeController.text = widget.program!.longitude.toString();
-      _soilTypeController.text = widget.program!.soil_type ?? '';
-      _areaHectaresController.text = widget.program!.area_hectares.toString();
+    if (widget.farm != null) {
+      _nameController.text = widget.farm!.name ?? '';
+      _locationController.text = widget.farm!.location ?? '';
+      _latitudeController.text = widget.farm!.latitude?.toString() ?? '';
+      _longitudeController.text = widget.farm!.longitude?.toString() ?? '';
+      _soilTypeController.text = widget.farm!.soil_type ?? '';
+      _areaHectaresController.text =
+          widget.farm!.area_hectares?.toString() ?? '';
     }
   }
 
@@ -47,7 +48,7 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
     super.dispose();
   }
 
-  Future<void> _saveProgram() async {
+  Future<void> _saveFarm() async {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
@@ -55,8 +56,8 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
     });
 
     try {
-      final program = Program(
-        id: widget.program?.id,
+      final farm = Farm(
+        id: widget.farm?.id,
         name: _nameController.text.trim(),
         location: _locationController.text.trim(),
         latitude: double.parse(_latitudeController.text.trim()),
@@ -65,17 +66,17 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
         area_hectares: double.parse(_areaHectaresController.text.trim()),
       );
 
-      if (widget.program == null) {
-        // Create new program
-        await ApiService.createProgram(program);
+      if (widget.farm == null) {
+        // Create new farm
+        await ApiService.createFarm(farm);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Farm created successfully')),
           );
         }
       } else {
-        // Update existing program
-        await ApiService.updateProgram(program);
+        // Update existing farm
+        await ApiService.updateFarm(farm);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Farm updated successfully')),
@@ -105,7 +106,7 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.program == null ? 'Add Program' : 'Edit Program'),
+        title: Text(widget.farm == null ? 'Add Farm' : 'Edit Farm'),
         actions: [
           if (_isLoading)
             const Padding(
@@ -241,7 +242,7 @@ class _ProgramFormScreenState extends State<ProgramFormScreen> {
                 ),
                 const SizedBox(height: 24),
                 ElevatedButton(
-                  onPressed: _isLoading ? null : _saveProgram,
+                  onPressed: _isLoading ? null : _saveFarm,
                   child: Text(_isLoading ? 'Saving...' : 'Save'),
                 ),
               ],

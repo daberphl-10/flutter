@@ -2,33 +2,33 @@ import 'package:flutter/material.dart';
 import '../models/program.dart';
 import '../services/program_service.dart';
 
-class ProgramProvider with ChangeNotifier {
-  List<Program> programs = [];
+class FarmProvider with ChangeNotifier {
+  List<Farm> farms = [];
   bool isLoading = false;
 
-  final ProgramService _service = ProgramService();
+  final FarmService _service = FarmService();
 
-  Future loadPrograms() async {
+  Future loadFarms() async {
     isLoading = true;
     notifyListeners();
 
-    programs = await _service.getPrograms();
+    farms = await _service.getFarms();
     isLoading = false;
     notifyListeners();
   }
 
-  Future<void> createProgram(Program program) async {
-    await _service.createProgram(program);
-    await loadPrograms();
+  Future<void> createFarm(Farm farm) async {
+    await _service.createFarm(farm);
+    await loadFarms();
   }
 
-  Future<void> updateProgram(Program program) async {
-    await _service.updateProgram(program);
-    await loadPrograms();
+  Future<void> updateFarm(Farm farm) async {
+    await _service.updateFarm(farm);
+    await loadFarms();
   }
 
-  Future<void> deleteProgram(int id) async {
-    await _service.deleteProgram(id);
-    await loadPrograms();
+  Future<void> deleteFarm(int id) async {
+    await _service.deleteFarm(id);
+    await loadFarms();
   }
 }

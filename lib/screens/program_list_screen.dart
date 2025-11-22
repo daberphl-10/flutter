@@ -4,19 +4,19 @@ import '../models/program.dart';
 import '../services/api_service.dart';
 import 'program_form_screen.dart';
 
-class ProgramListScreen extends StatefulWidget {
-  const ProgramListScreen({super.key});
+class FarmListScreen extends StatefulWidget {
+  const FarmListScreen({super.key});
   @override
-  State<ProgramListScreen> createState() => _ProgramListScreenState();
+  State<FarmListScreen> createState() => _FarmListScreenState();
 }
 
-class _ProgramListScreenState extends State<ProgramListScreen> {
-  late Future<List<Program>> _programList;
+class _FarmListScreenState extends State<FarmListScreen> {
+  late Future<List<Farm>> _farmList;
 
   @override
   void initState() {
     super.initState();
-    _refreshPrograms();
+    _refreshFarms();
   }
 
   // void getToken() async {
@@ -25,40 +25,40 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
 
   // }
 
-  void _refreshPrograms() {
+  void _refreshFarms() {
     setState(() {
-      _programList = ApiService.getPrograms();
+      _farmList = ApiService.getFarms();
     });
   }
 
-  Future<void> _addProgram() async {
+  Future<void> _addFarm() async {
     final result = await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const ProgramFormScreen()),
+      MaterialPageRoute(builder: (context) => const FarmFormScreen()),
     );
     if (result == true) {
-      _refreshPrograms();
+      _refreshFarms();
     }
   }
 
-  Future<void> _editProgram(Program program) async {
+  Future<void> _editFarm(Farm farm) async {
     final result = await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => ProgramFormScreen(program: program),
+        builder: (context) => FarmFormScreen(farm: farm),
       ),
     );
     if (result == true) {
-      _refreshPrograms();
+      _refreshFarms();
     }
   }
 
-  Future<void> _deleteProgram(Program program) async {
+  Future<void> _deleteFarm(Farm farm) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Delete Program'),
-        content: Text('Are you sure you want to delete "${program.name}"?'),
+        content: Text('Are you sure you want to delete "${farm.name}"?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -74,12 +74,12 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
 
     if (confirmed == true) {
       try {
-        await ApiService.deleteProgram(program.id!);
+        await ApiService.deleteFarm(farm.id!);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Program deleted successfully')),
           );
-          _refreshPrograms();
+          _refreshFarms();
         }
       } catch (e) {
         if (mounted) {
@@ -95,8 +95,8 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Farm List')),
-      body: FutureBuilder<List<Program>>(
-        future: _programList,
+      body: FutureBuilder<List<Farm>>(
+        future: _farmList,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
@@ -115,7 +115,7 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
                   ),
                   const SizedBox(height: 16),
                   ElevatedButton(
-                    onPressed: _refreshPrograms,
+                    onPressed: _refreshFarms,
                     child: const Text('Retry'),
                   ),
                 ],
@@ -123,27 +123,27 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
             );
           }
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No programs found'));
+            return const Center(child: Text('No farms found'));
           }
-          final programs = snapshot.data!;
+          final farms = snapshot.data!;
           return ListView.builder(
-            itemCount: programs.length,
+            itemCount: farms.length,
             itemBuilder: (context, index) {
-              final program = programs[index];
+              final farm = farms[index];
 
               return ListTile(
-                title: Text(program.name ?? 'N/A'),
-                subtitle: Text(program.location ?? 'N/A'),
+                title: Text(farm.name ?? 'N/A'),
+                subtitle: Text(farm.location ?? 'N/A'),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
                       icon: const Icon(Icons.edit, color: Colors.blue),
-                      onPressed: () => _editProgram(program),
+                      onPressed: () => _editFarm(farm),
                     ),
                     IconButton(
                       icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () => _deleteProgram(program),
+                      onPressed: () => _deleteFarm(farm),
                     ),
                   ],
                 ),
@@ -153,7 +153,7 @@ class _ProgramListScreenState extends State<ProgramListScreen> {
         },
       ),
       floatingActionButton: FloatingActionButton(
-        onPressed: _addProgram,
+        onPressed: _addFarm,
         child: const Icon(Icons.add),
       ),
     );

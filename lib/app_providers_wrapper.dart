@@ -12,7 +12,7 @@ class AppProvidersWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => ProgramProvider()),
+        ChangeNotifierProvider(create: (_) => FarmProvider()),
         ChangeNotifierProvider(create: (_) => NameProvider()),
         ChangeNotifierProvider(create: (_) => CacaoProvider()),
       ],
