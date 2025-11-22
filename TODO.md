@@ -1,0 +1,3 @@
+- [ ] Fix api_service.dart: Import baseUrl from variables.dart, remove local baseUrl, update all URIs to use '$baseUrl/programs'
+- [ ] Fix LoginPage.dart: Make login() async, use await for AuthService.login, add try-catch for error handling
+- [ ] Test login functionality after changes
