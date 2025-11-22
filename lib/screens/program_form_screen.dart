@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/program.dart';
 import '../services/api_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class FarmFormScreen extends StatefulWidget {
   final Farm? farm; // null for create, Farm for edit
@@ -60,18 +61,29 @@ class _FarmFormScreenState extends State<FarmFormScreen> {
         id: widget.farm?.id,
         name: _nameController.text.trim(),
         location: _locationController.text.trim(),
-        latitude: double.parse(_latitudeController.text.trim()),
-        longitude: double.parse(_longitudeController.text.trim()),
+        latitude: _latitudeController.text.trim().isEmpty
+            ? null
+            : double.parse(_latitudeController.text.trim()),
+        longitude: _longitudeController.text.trim().isEmpty
+            ? null
+            : double.parse(_longitudeController.text.trim()),
         soil_type: _soilTypeController.text.trim(),
-        area_hectares: double.parse(_areaHectaresController.text.trim()),
+        area_hectares: _areaHectaresController.text.trim().isEmpty
+            ? null
+            : double.parse(_areaHectaresController.text.trim()),
       );
 
       if (widget.farm == null) {
         // Create new farm
-        await ApiService.createFarm(farm);
+        final created = await ApiService.createFarm(farm);
+        // Set the newly created farm as the active farm for cacao operations
+        final prefs = await SharedPreferences.getInstance();
+        if (created.id != null) {
+          await prefs.setInt('activeFarmId', created.id!);
+        }
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Farm created successfully')),
+            const SnackBar(content: Text('Farm created and set as active')),
           );
         }
       } else {

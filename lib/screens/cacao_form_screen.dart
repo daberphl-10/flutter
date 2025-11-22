@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/cacao.dart';
 import '../services/cacao_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class CacaoFormScreen extends StatefulWidget {
   final Cacao? cacao; // null for create, Cacao for edit
@@ -28,7 +29,8 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
       _blockNameController.text = widget.cacao!.block_name ?? '';
       _treeCountController.text = widget.cacao!.tree_count?.toString() ?? '';
       _varietyController.text = widget.cacao!.variety ?? '';
-      _plantingDateController.text = widget.cacao!.date_planted?.toIso8601String().split('T').first ?? '';
+      _plantingDateController.text =
+          widget.cacao!.date_planted?.toIso8601String().split('T').first ?? '';
       _growthStageController.text = widget.cacao!.growth_stage ?? '';
       _statusController.text = widget.cacao!.status ?? '';
     }
@@ -49,22 +51,36 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
     if (!_formKey.currentState!.validate()) return;
 
     setState(() {
-      // _isLoading = true;
+      _isLoading = true;
     });
 
     try {
+      final baseCacao = widget.cacao;
       final cacao = Cacao(
+        farm_id: baseCacao?.farm_id,
         block_name: _blockNameController.text.trim(),
-        tree_count: int.parse(_treeCountController.text.trim()),
+        tree_count: int.tryParse(_treeCountController.text.trim()),
         variety: _varietyController.text.trim(),
-        date_planted: DateTime.parse(_plantingDateController.text.trim()),
+        date_planted: DateTime.tryParse(_plantingDateController.text.trim()),
         growth_stage: _growthStageController.text.trim(),
         status: _statusController.text.trim(),
       );
 
       if (widget.cacao == null) {
         // Create new cacao
-        await CacaoService().createCacao(cacao);
+        final prefs = await SharedPreferences.getInstance();
+        final int? farm_id =
+            prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
+        if (farm_id == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                  content: Text('Select a farm first before adding cacao.')),
+            );
+          }
+          return;
+        }
+        await CacaoService().createCacao(farm_id, cacao);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Cacao created successfully')),
@@ -129,6 +145,27 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
               TextFormField(
                 controller: _treeCountController,
                 decoration: const InputDecoration(labelText: 'Tree Count'),
+                enabled: !_isLoading,
+              ),
+              TextFormField(
+                controller: _varietyController,
+                decoration: const InputDecoration(labelText: 'Variety'),
+                enabled: !_isLoading,
+              ),
+              TextFormField(
+                controller: _plantingDateController,
+                decoration: const InputDecoration(
+                    labelText: 'Planting Date (YYYY-MM-DD)'),
+                enabled: !_isLoading,
+              ),
+              TextFormField(
+                controller: _growthStageController,
+                decoration: const InputDecoration(labelText: 'Growth Stage'),
+                enabled: !_isLoading,
+              ),
+              TextFormField(
+                controller: _statusController,
+                decoration: const InputDecoration(labelText: 'Status'),
                 enabled: !_isLoading,
               ),
               const SizedBox(height: 20),

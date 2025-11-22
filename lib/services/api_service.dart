@@ -12,26 +12,38 @@ class ApiService {
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     String token = prefs.getString('token') ?? '';
 
-    final response = await http.get(Uri.parse('$baseUrl/farms'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': 'Bearer $token',
-        });
+    final response = await http.get(Uri.parse('$baseUrl/farms'), headers: {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'Authorization': 'Bearer $token',
+    });
 
     if (response.statusCode == 200) {
-      // print(response.body);
-      final List data = jsonDecode(response.body)["data"];
-      return data.map((e) => Farm.fromJson(e)).toList();
+      final decoded = jsonDecode(response.body);
+      List dataList = [];
+      if (decoded is List) {
+        dataList = decoded;
+      } else if (decoded is Map && decoded['data'] is List) {
+        dataList = decoded['data'];
+      } else if (decoded is Map && decoded['data'] is Map) {
+        dataList = [decoded['data']];
+      } else if (decoded is Map) {
+        final firstList =
+            decoded.values.firstWhere((v) => v is List, orElse: () => null);
+        if (firstList is List) dataList = firstList;
+      }
+
+      return dataList
+          .map((e) => Farm.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
     } else {
-      throw Exception('Failed to load programs');
+      throw Exception('Failed to load farms (${response.statusCode})');
     }
   }
 
   static Future<Farm> createFarm(Farm farm) async {
-
-     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = prefs.getString('token').toString();
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
     final response = await http.post(
       Uri.parse('$baseUrl/farms'),
       headers: {
@@ -42,17 +54,30 @@ class ApiService {
       body: jsonEncode(farm.toJson()),
     );
 
-    if (response.statusCode == 201) {
-      final data = jsonDecode(response.body)["data"];
-      return Farm.fromJson(data);
+    if (response.statusCode == 201 || response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      Map<String, dynamic>? payload;
+      if (decoded is Map && decoded['data'] is Map) {
+        payload = Map<String, dynamic>.from(decoded['data']);
+      } else if (decoded is Map && decoded.containsKey('id')) {
+        payload = Map<String, dynamic>.from(decoded);
+      } else if (decoded is List && decoded.isNotEmpty) {
+        payload = Map<String, dynamic>.from(decoded[0]);
+      }
+
+      if (payload != null) return Farm.fromJson(payload);
+      if (decoded is Map)
+        return Farm.fromJson(Map<String, dynamic>.from(decoded));
+
+      throw Exception('Failed to parse created farm');
     } else {
-      throw Exception('Failed to create farm');
+      throw Exception('Failed to create farm (${response.statusCode})');
     }
   }
 
   static Future<Farm> updateFarm(Farm farm) async {
-     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = prefs.getString('token').toString();
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
 
     final response = await http.put(
       Uri.parse('$baseUrl/farms/${farm.id}'),
@@ -65,27 +90,31 @@ class ApiService {
     );
 
     if (response.statusCode == 200) {
-      final data = jsonDecode(response.body)["data"];
-      return Farm.fromJson(data);
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map && decoded['data'] is Map) {
+        return Farm.fromJson(Map<String, dynamic>.from(decoded['data']));
+      }
+      if (decoded is Map)
+        return Farm.fromJson(Map<String, dynamic>.from(decoded));
+      throw Exception('Failed to parse updated farm');
     } else {
-      throw Exception('Failed to update program');
+      throw Exception('Failed to update farm (${response.statusCode})');
     }
   }
 
   static Future<void> deleteFarm(int id) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
 
-     final SharedPreferences prefs = await SharedPreferences.getInstance();
-    String token = prefs.getString('token').toString();
-
-    final response = await http.delete(Uri.parse('$baseUrl/farms/$id'),
-    headers: {
+    final response =
+        await http.delete(Uri.parse('$baseUrl/farms/$id'), headers: {
       'Content-Type': 'application/json',
       'Accept': 'application/json',
       'Authorization': 'Bearer $token',
     });
 
     if (response.statusCode != 200 && response.statusCode != 204) {
-      throw Exception('Failed to delete farm');
+      throw Exception('Failed to delete farm (${response.statusCode})');
     }
   }
 }

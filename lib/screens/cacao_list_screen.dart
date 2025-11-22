@@ -20,9 +20,24 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
     _refreshCacaos();
   }
 
-  void _refreshCacaos() {
+  void _refreshCacaos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final int? farmId =
+        prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
+    if (farmId == null) {
+      setState(() {
+        _cacaoList = Future.value(<Cacao>[]);
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Select a farm first to view cacao trees.')),
+        );
+      });
+      return;
+    }
     setState(() {
-      _cacaoList = CacaoService().getCacaos();
+      _cacaoList = CacaoService().getCacaos(farmId);
     });
   }
 
@@ -66,6 +81,23 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
         ]
       )
     );
+
+    if (confirmed == true) {
+      try {
+        await CacaoService().deleteCacao(cacao.id!);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Cacao deleted successfully')),
+        );
+        _refreshCacaos();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: ${e.toString()}')),
+        );
+      }
+    }
+   
   }
 
   @override
@@ -81,8 +113,10 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
             return const Center(child: CircularProgressIndicator());
           } else if (snapshot.hasError) {
             return Center(child: Text('Error: ${snapshot.error}'));
-          } else if (!snapshot.hasData || snapshot.data!.isEmpty) {
-            return const Center(child: Text('No cacao found.'));
+          } else if (!snapshot.hasData) {
+            return const SizedBox.shrink();
+          } else if (snapshot.data!.isEmpty) {
+            return const Center(child: Text('No cacao found or no farm selected.'));
           } else {
             final cacaos = snapshot.data!;
             return ListView.builder(

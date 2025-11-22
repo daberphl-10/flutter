@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:withbackend/screens/program_list_screen.dart';
+import 'package:withbackend/screens/dashboard_wrapper.dart';
 import '../services/auth_service.dart';
 import 'register_page.dart';
 
@@ -26,7 +26,7 @@ class _LoginPageState extends State<LoginPage> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => const FarmListScreen(),
+                builder: (context) => const DashboardWrapper(),
               ),
             ),
           }

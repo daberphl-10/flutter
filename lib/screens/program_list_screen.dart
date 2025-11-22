@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/program.dart';
 import '../services/api_service.dart';
 import 'program_form_screen.dart';
+import 'dashboard_wrapper.dart';
 
 class FarmListScreen extends StatefulWidget {
   const FarmListScreen({super.key});
@@ -38,6 +39,7 @@ class _FarmListScreenState extends State<FarmListScreen> {
     );
     if (result == true) {
       _refreshFarms();
+      // No need to notify dashboard for now
     }
   }
 
@@ -134,6 +136,20 @@ class _FarmListScreenState extends State<FarmListScreen> {
               return ListTile(
                 title: Text(farm.name ?? 'N/A'),
                 subtitle: Text(farm.location ?? 'N/A'),
+                onTap: () async {
+                  final prefs = await SharedPreferences.getInstance();
+                  if (farm.id != null) {
+                    await prefs.setInt('activeFarmId', farm.id!);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                            content: Text(
+                                'Selected active farm: ${farm.name ?? farm.id}')),
+                      );
+                    }
+                    // Active farm selected
+                  }
+                },
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
