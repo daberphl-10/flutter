@@ -24,9 +24,12 @@ class CacaoService {
           : decoded is List
               ? decoded
               : <dynamic>[];
-      return data.map((e) => Cacao.fromJson(Map<String, dynamic>.from(e))).toList();
+      return data
+          .map((e) => Cacao.fromJson(Map<String, dynamic>.from(e)))
+          .toList();
     } else {
-      throw Exception("Failed to load cacaos (${response.statusCode}): ${response.body}");
+      throw Exception(
+          "Failed to load cacaos (${response.statusCode}): ${response.body}");
     }
   }
 
@@ -46,7 +49,8 @@ class CacaoService {
     if (response.statusCode == 201 || response.statusCode == 200) {
       return true;
     } else {
-      throw Exception("Failed to create cacao (${response.statusCode}): ${response.body}");
+      throw Exception(
+          "Failed to create cacao (${response.statusCode}): ${response.body}");
     }
   }
 
@@ -55,7 +59,7 @@ class CacaoService {
     final String token = prefs.getString('token') ?? '';
 
     final response = await http.put(
-      Uri.parse("$baseUrl/cacao-trees/${cacao.farm_id}"),
+      Uri.parse("$baseUrl/cacao-trees/${cacao.id}"),
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json",
@@ -66,7 +70,8 @@ class CacaoService {
     if (response.statusCode == 200) {
       return true;
     } else {
-      throw Exception("Failed to update cacao (${response.statusCode}): ${response.body}");
+      throw Exception(
+          "Failed to update cacao (${response.statusCode}): ${response.body}");
     }
   }
 
@@ -80,10 +85,11 @@ class CacaoService {
         "Content-Type": "application/json",
         "Accept": "application/json",
         "Authorization": "Bearer $token",
-        },
+      },
     );
     if (response.statusCode != 200 && response.statusCode != 204) {
-      throw Exception("Failed to delete cacao (${response.statusCode}): ${response.body}");
+      throw Exception(
+          "Failed to delete cacao (${response.statusCode}): ${response.body}");
     }
   }
 }

@@ -57,6 +57,7 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
     try {
       final baseCacao = widget.cacao;
       final cacao = Cacao(
+        id: baseCacao?.id,
         farm_id: baseCacao?.farm_id,
         block_name: _blockNameController.text.trim(),
         tree_count: int.tryParse(_treeCountController.text.trim()),

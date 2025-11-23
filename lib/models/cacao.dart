@@ -21,23 +21,21 @@ class Cacao {
 
   factory Cacao.fromJson(Map<String, dynamic> json) => Cacao(
         id: _parseInt(json["id"]),
-        farm_id: _parseInt(json["farmId"]),
-        block_name: json["blockName"]?.toString(),
-        tree_count: _parseInt(json["treeCount"]),
+        farm_id: _parseInt(json["farm_id"]),
+        block_name: json["block_name"]?.toString(),
+        tree_count: _parseInt(json["tree_count"]),
         variety: json["variety"]?.toString(),
-        date_planted: _parseDate(json["plantingDate"]),
-        growth_stage: json["growthStage"]?.toString(),
+        date_planted: _parseDate(json["planting_date"]),
+        growth_stage: json["growth_stage"]?.toString(),
         status: json["status"]?.toString(),
       );
 
   Map<String, dynamic> toJson() => {
-        "id": id,
-        "farmId": farm_id,
-        "blockName": block_name,
-        "treeCount": tree_count,
+        "block_name": block_name,
+        "tree_count": tree_count,
         "variety": variety,
-        "plantingDate": date_planted?.toIso8601String(),
-        "growthStage": growth_stage,
+        "planting_date": date_planted?.toIso8601String(),
+        "growth_stage": growth_stage,
         "status": status,
       };
 
