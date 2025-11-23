@@ -6,7 +6,10 @@ import 'program_form_screen.dart';
 import 'dashboard_wrapper.dart';
 
 class FarmListScreen extends StatefulWidget {
-  const FarmListScreen({super.key});
+  final VoidCallback? onFarmSelected;
+
+  const FarmListScreen({super.key, this.onFarmSelected});
+
   @override
   State<FarmListScreen> createState() => _FarmListScreenState();
 }
@@ -147,7 +150,8 @@ class _FarmListScreenState extends State<FarmListScreen> {
                                 'Selected active farm: ${farm.name ?? farm.id}')),
                       );
                     }
-                    // Active farm selected
+                    // Call the callback to notify parent of farm selection
+                    widget.onFarmSelected?.call();
                   }
                 },
                 trailing: Row(

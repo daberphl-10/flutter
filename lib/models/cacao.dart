@@ -25,7 +25,7 @@ class Cacao {
         block_name: json["block_name"]?.toString(),
         tree_count: _parseInt(json["tree_count"]),
         variety: json["variety"]?.toString(),
-        date_planted: _parseDate(json["planting_date"]),
+        date_planted: _parseDate(json["date_planted"]),
         growth_stage: json["growth_stage"]?.toString(),
         status: json["status"]?.toString(),
       );
@@ -34,7 +34,7 @@ class Cacao {
         "block_name": block_name,
         "tree_count": tree_count,
         "variety": variety,
-        "planting_date": date_planted?.toIso8601String(),
+        "date_planted": date_planted?.toIso8601String(),
         "growth_stage": growth_stage,
         "status": status,
       };

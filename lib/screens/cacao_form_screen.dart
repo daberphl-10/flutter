@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../models/cacao.dart';
+import '../models/program.dart'; // For Farm
+import '../providers/program_provider.dart'; // FarmProvider
 import '../services/cacao_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -21,6 +24,7 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
   final _growthStageController = TextEditingController();
   final _statusController = TextEditingController();
   bool _isLoading = false;
+  int? _selectedFarmId;
 
   @override
   void initState() {
@@ -33,6 +37,29 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
           widget.cacao!.date_planted?.toIso8601String().split('T').first ?? '';
       _growthStageController.text = widget.cacao!.growth_stage ?? '';
       _statusController.text = widget.cacao!.status ?? '';
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final farmProvider = Provider.of<FarmProvider>(context, listen: false);
+    if (farmProvider.farms.isEmpty) {
+      farmProvider.loadFarms();
+    }
+    // Set selected farm if not set
+    if (_selectedFarmId == null) {
+      _selectedFarmId = widget.cacao?.farm_id;
+      if (_selectedFarmId == null) {
+        SharedPreferences.getInstance().then((prefs) {
+          final activeFarmId = prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
+          if (mounted && _selectedFarmId == null) {
+            setState(() {
+              _selectedFarmId = activeFarmId;
+            });
+          }
+        });
+      }
     }
   }
 
@@ -58,7 +85,7 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
       final baseCacao = widget.cacao;
       final cacao = Cacao(
         id: baseCacao?.id,
-        farm_id: baseCacao?.farm_id,
+        farm_id: _selectedFarmId,
         block_name: _blockNameController.text.trim(),
         tree_count: int.tryParse(_treeCountController.text.trim()),
         variety: _varietyController.text.trim(),
@@ -69,19 +96,7 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
 
       if (widget.cacao == null) {
         // Create new cacao
-        final prefs = await SharedPreferences.getInstance();
-        final int? farm_id =
-            prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
-        if (farm_id == null) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                  content: Text('Select a farm first before adding cacao.')),
-            );
-          }
-          return;
-        }
-        await CacaoService().createCacao(farm_id, cacao);
+        await CacaoService().createCacao(_selectedFarmId ?? 0, cacao);
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Cacao created successfully')),
@@ -132,6 +147,38 @@ class _CacaoFormScreenState extends State<CacaoFormScreen> {
           key: _formKey,
           child: ListView(
             children: [
+              Consumer<FarmProvider>(
+                builder: (context, farmProvider, child) {
+                  if (farmProvider.isLoading) {
+                    return const CircularProgressIndicator();
+                  }
+                  if (farmProvider.farms.isEmpty) {
+                    return const Text('No farms available. Please add a farm first.');
+                  }
+                  return DropdownButtonFormField<int>(
+                    value: _selectedFarmId,
+                    decoration: const InputDecoration(labelText: 'Farm'),
+                    items: farmProvider.farms.map((farm) {
+                      return DropdownMenuItem<int>(
+                        value: farm.id,
+                        child: Text(farm.name ?? 'Unnamed Farm'),
+                      );
+                    }).toList(),
+                    validator: (value) {
+                      if (value == null) {
+                        return 'Please select a farm';
+                      }
+                      return null;
+                    },
+                    onChanged: _isLoading ? null : (value) {
+                      setState(() {
+                        _selectedFarmId = value;
+                      });
+                    },
+                  );
+                },
+              ),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _blockNameController,
                 decoration: const InputDecoration(labelText: 'Block Name'),

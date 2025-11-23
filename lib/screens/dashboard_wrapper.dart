@@ -43,7 +43,7 @@ class _DashboardWrapperState extends State<DashboardWrapper> {
   @override
   Widget build(BuildContext context) {
     final screens = <Widget>[
-      const FarmListScreen(),
+      FarmListScreen(onFarmSelected: refreshActiveFarmFlag),
       if (_hasActiveFarm) const CacaoListScreen(),
     ];
 

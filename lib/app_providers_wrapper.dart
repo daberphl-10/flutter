@@ -6,7 +6,8 @@ import '../providers/program_provider.dart';
 import '../providers/cacao_provider.dart';
 
 class AppProvidersWrapper extends StatelessWidget {
-  const AppProvidersWrapper({super.key});
+  final Widget child;
+  const AppProvidersWrapper({super.key, required this.child});
 
   @override
   Widget build(BuildContext context) {
@@ -16,7 +17,7 @@ class AppProvidersWrapper extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => NameProvider()),
         ChangeNotifierProvider(create: (_) => CacaoProvider()),
       ],
-      child: const DashboardWrapper(),
+      child: child,
     );
   }
 }

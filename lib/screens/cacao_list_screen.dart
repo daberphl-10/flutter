@@ -4,7 +4,6 @@ import '../services/cacao_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'cacao_form_screen.dart';
 
-
 class CacaoListScreen extends StatefulWidget {
   const CacaoListScreen({super.key});
   @override
@@ -12,7 +11,7 @@ class CacaoListScreen extends StatefulWidget {
 }
 
 class _CacaoListScreenState extends State<CacaoListScreen> {
-  late Future<List<Cacao>> _cacaoList;
+  Future<List<Cacao>>? _cacaoList;
 
   @override
   void initState() {
@@ -22,8 +21,7 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
 
   void _refreshCacaos() async {
     final prefs = await SharedPreferences.getInstance();
-    final int? farmId =
-        prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
+    final int? farmId = prefs.getInt('activeFarmId') ?? prefs.getInt('farmId');
     if (farmId == null) {
       setState(() {
         _cacaoList = Future.value(<Cacao>[]);
@@ -31,7 +29,8 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Select a farm first to view cacao trees.')),
+          const SnackBar(
+              content: Text('Select a farm first to view cacao trees.')),
         );
       });
       return;
@@ -65,22 +64,21 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
 
   Future<void> _deleteCacao(Cacao cacao) async {
     final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete Cacao'),
-        content: Text('Are you sure you want to delete ${cacao.variety}?'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete'),
-          ),
-        ]
-      )
-    );
+        context: context,
+        builder: (context) => AlertDialog(
+                title: const Text('Delete Cacao'),
+                content:
+                    Text('Are you sure you want to delete ${cacao.variety}?'),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    child: const Text('Cancel'),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(context, true),
+                    child: const Text('Delete'),
+                  ),
+                ]));
 
     if (confirmed == true) {
       try {
@@ -97,7 +95,6 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
         );
       }
     }
-   
   }
 
   @override
@@ -116,7 +113,8 @@ class _CacaoListScreenState extends State<CacaoListScreen> {
           } else if (!snapshot.hasData) {
             return const SizedBox.shrink();
           } else if (snapshot.data!.isEmpty) {
-            return const Center(child: Text('No cacao found or no farm selected.'));
+            return const Center(
+                child: Text('No cacao found or no farm selected.'));
           } else {
             final cacaos = snapshot.data!;
             return ListView.builder(
