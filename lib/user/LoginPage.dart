@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:withbackend/screens/dashboard_wrapper.dart';
+import 'package:withbackend/models/program.dart';
+import 'package:withbackend/screens/dashboard_screen.dart';
+import 'package:withbackend/screens/farm_map_screen.dart';
+import 'package:withbackend/screens/main_layout.dart';
+// import 'package:withbackend/screens/dashboard_wrapper.dart';
 import '../services/auth_service.dart';
 import 'register_page.dart';
-
+import '../screens/main_layout.dart';
 class LoginPage extends StatefulWidget {
   const LoginPage({super.key});
 
@@ -26,7 +30,7 @@ class _LoginPageState extends State<LoginPage> {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => const DashboardWrapper(),
+                builder: (context) => MainLayout(),
               ),
             ),
           }
