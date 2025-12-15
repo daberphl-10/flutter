@@ -8,7 +8,7 @@ class AuthService {
   static Future<bool> login(String email, String password) async{
 
     final response = await http.post(
-      Uri.parse('$baseUrl/login'),
+      Uri.parse('$baseUrl/mobile/login'), // Use mobile login endpoint for Flutter app
       headers: {
         "Content-Type": "application/json",
         "Accept": "application/json"

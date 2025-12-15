@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import '../models/program.dart';
 import '../variables.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -146,9 +148,10 @@ class ApiService {
     var uri = Uri.parse('$baseUrl/detect-disease');
     var request = http.MultipartRequest('POST', uri);
 
-    // Headers
+    // Headers - DO NOT set Content-Type for multipart, let http package set it with boundary
     request.headers['Authorization'] = 'Bearer $token';
     request.headers['Accept'] = 'application/json';
+    // Note: Content-Type will be set automatically by MultipartRequest with boundary
 
     // Text Fields
     request.fields['cacao_tree_id'] = treeId;
@@ -156,37 +159,99 @@ class ApiService {
     if (long != null) request.fields['longitude'] = long.toString();
 
     // --- 🚀 THE FIX IS HERE ---
-    if (kIsWeb) {
-      // WEB: Use Bytes
-      if (file.bytes != null) {
-        request.files.add(http.MultipartFile.fromBytes('image', file.bytes!,
-            filename: file.name));
-      } else {
-        throw Exception("File bytes are null on Web.");
+    // Prefer bytes when available (works on both web and mobile)
+    String fileName = file.name.isNotEmpty 
+        ? file.name 
+        : 'image_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    
+    // Ensure filename has proper extension
+    if (!fileName.contains('.')) {
+      fileName = '$fileName.jpg';
+    }
+    
+    // Determine content type from filename
+    String contentType = 'image/jpeg'; // Default
+    if (fileName.toLowerCase().endsWith('.png')) {
+      contentType = 'image/png';
+    } else if (fileName.toLowerCase().endsWith('.jpg') || fileName.toLowerCase().endsWith('.jpeg')) {
+      contentType = 'image/jpeg';
+    }
+    
+    // Always use bytes - read from path if needed, but convert to bytes first
+    // This ensures the file is accessible and properly formatted
+    http.MultipartFile multipartFile;
+    List<int> fileBytes;
+    
+    if (file.bytes != null && file.bytes!.isNotEmpty) {
+      // Use existing bytes
+      fileBytes = file.bytes!;
+      print("✅ Using existing bytes: ${fileBytes.length} bytes");
+    } else if (!kIsWeb && file.path != null && file.path!.isNotEmpty) {
+      // MOBILE: Read file from path into bytes
+      print("✅ Reading file from path: ${file.path}");
+      try {
+        final fileObj = File(file.path!);
+        if (await fileObj.exists()) {
+          fileBytes = await fileObj.readAsBytes();
+          print("✅ File read successfully: ${fileBytes.length} bytes");
+        } else {
+          throw Exception("File does not exist at path: ${file.path}");
+        }
+      } catch (e) {
+        print("❌ Failed to read file from path: $e");
+        throw Exception("Image file is invalid: cannot read from path. Error: $e");
       }
     } else {
-      // MOBILE/DESKTOP: Use Path
-      if (file.path != null) {
-        request.files
-            .add(await http.MultipartFile.fromPath('image', file.path!));
-      } else {
-        throw Exception("File path is null.");
-      }
+      throw Exception("Image file is invalid: no bytes or path available.");
+    }
+    
+    // Create multipart file from bytes (always use bytes for consistency)
+    multipartFile = http.MultipartFile.fromBytes(
+      'image', 
+      fileBytes,
+      filename: fileName,
+      contentType: MediaType.parse(contentType),
+    );
+
+    // Add the file to the request
+    request.files.add(multipartFile);
+    
+    // Debug: Verify the request structure
+    print("🔍 Request details:");
+    print("  - Fields: ${request.fields}");
+    print("  - Files count: ${request.files.length}");
+    print("  - File field name: ${multipartFile.field}");
+    print("  - File filename: ${multipartFile.filename}");
+    try {
+      final fileLength = await multipartFile.length;
+      print("  - File length: $fileLength bytes");
+    } catch (e) {
+      print("  - File length error: $e");
     }
 
     // Send
     try {
+      print("📤 Uploading image: filename=$fileName, size=${file.size} bytes, contentType=$contentType");
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
+
+      print("📥 Server response: status=${response.statusCode}, body=${response.body}");
 
       if (response.statusCode == 200 || response.statusCode == 201) {
         print("🔍 RAW SERVER RESPONSE: ${response.body}");
         return json.decode(response.body);
       } else {
-        throw Exception(
-            'Server Error (${response.statusCode}): ${response.body}');
+        // Try to parse error message for better feedback
+        try {
+          final errorBody = json.decode(response.body);
+          final errorMessage = errorBody['message'] ?? errorBody['errors']?.toString() ?? response.body;
+          throw Exception('Server Error (${response.statusCode}): $errorMessage');
+        } catch (_) {
+          throw Exception('Server Error (${response.statusCode}): ${response.body}');
+        }
       }
     } catch (e) {
+      print("❌ Upload error: $e");
       throw Exception('Connection Failed: $e');
     }
   }
@@ -507,6 +572,167 @@ class ApiService {
       }
     } catch (e) {
       print('❌ Error loading harvest logs: $e');
+      rethrow;
+    }
+  }
+
+  /// Get a specific tree by ID
+  /// Returns the tree object with latest_log containing current pod_count
+  static Future<Map<String, dynamic>> getTree(int treeId) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/trees/$treeId'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['data'] != null) {
+          return Map<String, dynamic>.from(data['data']);
+        } else if (data is Map) {
+          return Map<String, dynamic>.from(data);
+        }
+        throw Exception('Invalid tree data format');
+      } else {
+        throw Exception('Failed to load tree (${response.statusCode})');
+      }
+    } catch (e) {
+      print('❌ Error loading tree: $e');
+      rethrow;
+    }
+  }
+
+  // ==========================================================
+  // 📢 NOTIFICATION OPERATIONS
+  // ==========================================================
+
+  /// Get all notifications for the authenticated user
+  static Future<List<dynamic>> getNotifications() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/notifications'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is List) {
+          return data;
+        } else if (data is Map && data['data'] is List) {
+          return data['data'];
+        }
+        return [];
+      } else {
+        throw Exception('Failed to load notifications (${response.statusCode})');
+      }
+    } catch (e) {
+      print('❌ Error loading notifications: $e');
+      rethrow;
+    }
+  }
+
+  /// Mark a notification as read
+  static Future<bool> markNotificationAsRead(int notificationId) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
+
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/notifications/$notificationId/read'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return true;
+      } else {
+        throw Exception('Failed to mark notification as read (${response.statusCode})');
+      }
+    } catch (e) {
+      print('❌ Error marking notification as read: $e');
+      rethrow;
+    }
+  }
+
+  // ==========================================================
+  // 👤 USER PROFILE OPERATIONS
+  // ==========================================================
+
+  /// Get current user profile
+  static Future<Map<String, dynamic>> getUserProfile() async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/profile'),
+        headers: {
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['data'] != null) {
+          return Map<String, dynamic>.from(data['data']);
+        } else if (data is Map) {
+          return Map<String, dynamic>.from(data);
+        }
+        throw Exception('Invalid profile data format');
+      } else {
+        throw Exception('Failed to load profile (${response.statusCode})');
+      }
+    } catch (e) {
+      print('❌ Error loading profile: $e');
+      rethrow;
+    }
+  }
+
+  /// Update user profile
+  static Future<Map<String, dynamic>> updateProfile(Map<String, dynamic> profileData) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    String token = prefs.getString('token') ?? '';
+
+    try {
+      final response = await http.put(
+        Uri.parse('$baseUrl/profile'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode(profileData),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is Map && data['data'] != null) {
+          return Map<String, dynamic>.from(data['data']);
+        } else if (data is Map) {
+          return Map<String, dynamic>.from(data);
+        }
+        throw Exception('Invalid profile update response');
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to update profile');
+      }
+    } catch (e) {
+      print('❌ Error updating profile: $e');
       rethrow;
     }
   }

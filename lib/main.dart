@@ -2,8 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'providers/scan_provider.dart';
 import 'providers/refresh_provider.dart';
+import 'providers/notification_provider.dart';
 import 'user/LoginPage.dart';
 import 'screens/main_layout.dart';
+import 'theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
@@ -12,6 +14,7 @@ void main() {
       providers: [
         ChangeNotifierProvider(create: (_) => ScanProvider()),
         ChangeNotifierProvider(create: (_) => RefreshProvider()),
+        ChangeNotifierProvider(create: (_) => NotificationProvider()),
       ],
       child: MyApp(),
     ),
@@ -41,18 +44,49 @@ class _MyAppState extends State<MyApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Cacao Doctor',
+      title: 'AIM-CaD',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        primarySwatch: Colors.brown,
-      ),
+      theme: AppTheme.lightTheme,
       home: FutureBuilder<bool>(
         future: _checkAuthStatus,
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return Scaffold(
-              body: Center(
-                child: CircularProgressIndicator(),
+              body: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      AppTheme.primaryColor,
+                      AppTheme.primaryLight,
+                    ],
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Image.network(
+                        'https://res.cloudinary.com/dflyqatql/image/upload/v1765116879/Gemini_Generated_Image_10t9ww10t9ww10t9-removebg-preview_qkq1px.png',
+                        width: 64,
+                        height: 64,
+                        fit: BoxFit.contain,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Icon(
+                            Icons.eco,
+                            size: 64,
+                            color: Colors.white,
+                          );
+                        },
+                      ),
+                      SizedBox(height: AppTheme.spacingMD),
+                      CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             );
           }
@@ -60,7 +94,7 @@ class _MyAppState extends State<MyApp> {
           if (snapshot.hasData && snapshot.data == true) {
             return MainLayout();
           } else {
-            return LoginPage();
+            return LoginPage(); 
           }
         },
       ),

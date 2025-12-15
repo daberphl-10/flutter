@@ -3,14 +3,14 @@ class DetectionResponse {
   final String detectedDisease;
   final double confidence;
   final String? imagePath;
-  final String treatment; // ✅ Add this
+  final String treatment; 
 
   DetectionResponse({
     required this.message,
     required this.detectedDisease,
     required this.confidence,
     this.imagePath,
-    required this.treatment, // ✅ Add this
+    required this.treatment, 
   });
 
   factory DetectionResponse.fromJson(Map<String, dynamic> json) {
@@ -18,8 +18,7 @@ class DetectionResponse {
     String disease = "Unknown";
     double confidence = 0.0;
     String? imgPath;
-    String treatment = "No recommendation available."; // ✅ Add this
-
+    String treatment = "No recommendation available."; 
     // 2. EXTRACT DATA (Safely)
     // Check if we have the 'data' object (from Tree Log response)
     if (json['data'] != null) {
@@ -39,9 +38,8 @@ class DetectionResponse {
         confidence = data['disease_type'] != null ? 1.0 : 0.0;
       }
 
-      // ---------------------------------------------------------
-      // 🚀 LOGIC GATES (USER RULES)
-      // ---------------------------------------------------------
+      // LOGIC GATES (USER RULES)
+    
 
       // RULE 1: Low Confidence = "Not a Cacao"
       if (confidence < 0.60) {
@@ -62,7 +60,7 @@ class DetectionResponse {
        // ... (Keep your old fallback logic here if you want, or remove it)
     }
 
-    // ✅ Extract treatment recommendation from backend
+    // Extract treatment recommendation from backend
     if (json['treatment'] != null) {
       treatment = json['treatment'].toString();
     }
@@ -72,7 +70,7 @@ class DetectionResponse {
       detectedDisease: disease,
       confidence: confidence,
       imagePath: imgPath,
-      treatment: treatment, // ✅ Add this
+      treatment: treatment, 
     );
   }
 }

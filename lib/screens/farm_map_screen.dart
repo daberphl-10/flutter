@@ -2,14 +2,29 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
-import '../services/auth_service.dart';
 import '../providers/refresh_provider.dart';
+import '../theme/app_theme.dart';
 import 'dashboard_screen.dart';
-import '../user/LoginPage.dart';
 import '../screens/harvest_entry_form.dart';
 
 class FarmMapScreen extends StatefulWidget {
+  final int? farmId; // Optional farm ID to navigate to
+  final double? initialLatitude; // Optional initial latitude
+  final double? initialLongitude; // Optional initial longitude
+  final bool showTrees; // Whether to show trees view instead of farms
+  final int? treeId; // Optional tree ID to highlight when navigating from tree list
+  
+  const FarmMapScreen({
+    super.key,
+    this.farmId,
+    this.initialLatitude,
+    this.initialLongitude,
+    this.showTrees = false, // Default to farms view
+    this.treeId,
+  });
+
   @override
   State<FarmMapScreen> createState() => FarmMapScreenState();
 }
@@ -25,23 +40,74 @@ class FarmMapScreenState extends State<FarmMapScreen>
   List<dynamic> _farms = [];
   List<dynamic> _trees = [];
   dynamic _selectedFarm; // Track which farm is selected for tree viewing
+  bool _isSelectingTreeLocation = false; // Track if user is selecting a tree location on map
+  LatLng? _selectedTreeLocation; // Store selected location for new tree
+
+  // Variety options
+  static const List<String> _varietyOptions = [
+    'BR 25',
+    'UF 18',
+    'ICS 40',
+    'K 1',
+    'K 2',
+    'PBC 123',
+    'W 10',
+    'Unknown / Native',
+  ];
 
   // Default Camera Position (Change this to your Farm's location)
-  static const CameraPosition _kGooglePlex = CameraPosition(
-    target: LatLng(16.6038, 121.1939),
-    zoom: 16, // Zoomed in closer for web
-  );
+  CameraPosition get _initialCameraPosition {
+    if (widget.initialLatitude != null && widget.initialLongitude != null) {
+      return CameraPosition(
+        target: LatLng(widget.initialLatitude!, widget.initialLongitude!),
+        zoom: 16.0,
+      );
+    }
+    return const CameraPosition(
+      target: LatLng(16.6038, 121.1939),
+      zoom: 16, // Zoomed in closer for web
+    );
+  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    
+    // If showTrees is true, start with trees view
+    if (widget.showTrees) {
+      _showFarms = false;
+    }
+    
     _loadData();
     
     // Listen to refresh provider for real-time updates
     Future.microtask(() {
       context.read<RefreshProvider>().addListener(_onRefreshNotification);
     });
+    
+    // If initial coordinates are provided, navigate to that location after map loads
+    if (widget.initialLatitude != null && widget.initialLongitude != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _navigateToLocation(
+          widget.initialLatitude!,
+          widget.initialLongitude!,
+        );
+      });
+    }
+  }
+  
+  // Navigate map camera to specific location
+  Future<void> _navigateToLocation(double latitude, double longitude) async {
+    final GoogleMapController controller = await _controller.future;
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(
+        CameraPosition(
+          target: LatLng(latitude, longitude),
+          zoom: 16.0,
+        ),
+      ),
+    );
   }
 
   void _onRefreshNotification() {
@@ -107,12 +173,20 @@ class FarmMapScreenState extends State<FarmMapScreen>
           double lat = farm.latitude ?? 0.0;
           double lng = farm.longitude ?? 0.0;
 
+          // If this is the farm we're navigating to, highlight it
+          bool isTargetFarm = widget.farmId != null && farm.id == widget.farmId;
+
           return Marker(
             markerId: MarkerId("farm_$id"),
             position: LatLng(lat, lng),
-            onTap: () => _showFarmDetails(farm),
-            // Farm markers use blue color
-            icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
+            // Disable marker taps when selecting tree location
+            onTap: _isSelectingTreeLocation ? null : () => _showFarmDetails(farm),
+            // Farm markers use blue color, or red if it's the target farm
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              isTargetFarm 
+                ? BitmapDescriptor.hueRed 
+                : BitmapDescriptor.hueBlue
+            ),
             infoWindow: InfoWindow(
               title: farm.name ?? "Unknown Farm",
               snippet: farm.location ?? "Location unknown",
@@ -122,6 +196,29 @@ class FarmMapScreenState extends State<FarmMapScreen>
 
         _isLoading = false;
       });
+      
+      // If a farm ID is provided, find and navigate to that farm
+      if (widget.farmId != null) {
+        try {
+          final targetFarm = farms.firstWhere(
+            (farm) => farm.id == widget.farmId,
+          );
+          
+          if (targetFarm.latitude != null && 
+              targetFarm.longitude != null &&
+              targetFarm.latitude != 0.0 &&
+              targetFarm.longitude != 0.0) {
+            // Wait a bit for the map to be ready, then navigate
+            Future.delayed(const Duration(milliseconds: 500), () {
+              if (mounted) {
+                _navigateToLocation(targetFarm.latitude!, targetFarm.longitude!);
+              }
+            });
+          }
+        } catch (e) {
+          print("Farm with ID ${widget.farmId} not found: $e");
+        }
+      }
     } catch (e) {
       print("Error loading farms: $e");
       setState(() => _isLoading = false);
@@ -146,26 +243,59 @@ class FarmMapScreenState extends State<FarmMapScreen>
           String status = "Healthy";
 
           if (log != null) {
-            // If log exists, use the specific disease name (e.g., "Frosty Pod Rot")
-            status = log['disease_type'] ?? log['status'] ?? "Unknown";
-          }
-
-          // 3. Color Logic
-          double hue = BitmapDescriptor.hueGreen; // Default Green
-
-          if (status != "Healthy") {
-            if (status.toLowerCase().contains('black')) {
-              hue = BitmapDescriptor.hueViolet; // Darker for Black Pod
-            } else {
-              hue = BitmapDescriptor.hueRed; // Red for other diseases
+            String? diseaseType = log['disease_type']?.toString();
+            String? logStatus = log['status']?.toString();
+            
+            // If disease_type exists and is not empty/null/healthy, use it
+            if (diseaseType != null && 
+                diseaseType.trim().isNotEmpty && 
+                diseaseType.toLowerCase() != 'healthy' &&
+                diseaseType.toLowerCase() != 'null') {
+              status = diseaseType;
+            } 
+            // If disease_type is null/empty/healthy, check status field
+            else if (logStatus != null && 
+                     logStatus.trim().isNotEmpty &&
+                     logStatus.toLowerCase() != 'healthy' &&
+                     logStatus.toLowerCase() != 'null') {
+              status = logStatus;
+            } 
+            // Otherwise, tree is healthy
+            else {
+              status = "Healthy";
             }
           }
+
+          // 3. Color Logic - Match Vue.js color scheme
+          double hue = BitmapDescriptor.hueGreen; // Green for Healthy
+
+          // Check if status is actually healthy (case-insensitive)
+          final statusLower = status.toLowerCase().trim();
+          if (statusLower != "healthy" && statusLower.isNotEmpty) {
+            if (statusLower.contains('black pod')) {
+              hue = BitmapDescriptor.hueViolet; // Violet/Dark Purple for Black Pod Rot
+            } else if (statusLower.contains('frosty') || statusLower.contains('frosty pod')) {
+              hue = BitmapDescriptor.hueCyan; // Azure/Light Blue for Frosty Pod Rot
+            } else if (statusLower.contains('pod borer') || statusLower.contains('borer') || statusLower.contains('cacao pod borer')) {
+              hue = BitmapDescriptor.hueOrange; // Orange for Cacao Pod Borer
+            } else if (statusLower.contains('witches') || statusLower.contains('broom')) {
+              hue = BitmapDescriptor.hueRed; // Red for Witches' Broom
+            } else {
+              hue = BitmapDescriptor.hueRed; // Red for other diseases (Canker, etc.)
+            }
+          }
+
+          // Highlight target tree if navigating from tree list
+          bool isTargetTree = widget.treeId != null && tree['id'] == widget.treeId;
 
           return Marker(
             markerId: MarkerId(id),
             position: LatLng(lat, lng),
-            onTap: () => _showTreeDetails(tree), // Pass the full object
-            icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+            // Disable marker taps when selecting tree location
+            onTap: _isSelectingTreeLocation ? null : () => _showTreeDetails(tree),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              isTargetTree ? BitmapDescriptor.hueRed : hue
+            ),
           );
         }).toSet();
 
@@ -194,25 +324,58 @@ class FarmMapScreenState extends State<FarmMapScreen>
           String status = "Healthy";
 
           if (log != null) {
-            status = log['disease_type'] ?? log['status'] ?? "Unknown";
-          }
-
-          // 3. Color Logic
-          double hue = BitmapDescriptor.hueGreen; // Default Green
-
-          if (status != "Healthy") {
-            if (status.toLowerCase().contains('black')) {
-              hue = BitmapDescriptor.hueViolet; // Darker for Black Pod
-            } else {
-              hue = BitmapDescriptor.hueRed; // Red for other diseases
+            String? diseaseType = log['disease_type']?.toString();
+            String? logStatus = log['status']?.toString();
+            
+            // If disease_type exists and is not empty/null/healthy, use it
+            if (diseaseType != null && 
+                diseaseType.trim().isNotEmpty && 
+                diseaseType.toLowerCase() != 'healthy' &&
+                diseaseType.toLowerCase() != 'null') {
+              status = diseaseType;
+            } 
+            // If disease_type is null/empty/healthy, check status field
+            else if (logStatus != null && 
+                     logStatus.trim().isNotEmpty &&
+                     logStatus.toLowerCase() != 'healthy' &&
+                     logStatus.toLowerCase() != 'null') {
+              status = logStatus;
+            } 
+            // Otherwise, tree is healthy
+            else {
+              status = "Healthy";
             }
           }
+
+          // 3. Color Logic - Match Vue.js color scheme
+          double hue = BitmapDescriptor.hueGreen; // Green for Healthy
+
+          // Check if status is actually healthy (case-insensitive)
+          final statusLower = status.toLowerCase().trim();
+          if (statusLower != "healthy" && statusLower.isNotEmpty) {
+            if (statusLower.contains('black pod')) {
+              hue = BitmapDescriptor.hueViolet; // Violet/Dark Purple for Black Pod Rot
+            } else if (statusLower.contains('frosty') || statusLower.contains('frosty pod')) {
+              hue = BitmapDescriptor.hueCyan; // Azure/Light Blue for Frosty Pod Rot
+            } else if (statusLower.contains('pod borer') || statusLower.contains('borer') || statusLower.contains('cacao pod borer')) {
+              hue = BitmapDescriptor.hueOrange; // Orange for Cacao Pod Borer
+            } else if (statusLower.contains('witches') || statusLower.contains('broom')) {
+              hue = BitmapDescriptor.hueRed; // Red for Witches' Broom
+            } else {
+              hue = BitmapDescriptor.hueRed; // Red for other diseases (Canker, etc.)
+            }
+          }
+
+          // Highlight target tree if navigating from tree list
+          bool isTargetTree = widget.treeId != null && tree['id'] == widget.treeId;
 
           return Marker(
             markerId: MarkerId(id),
             position: LatLng(lat, lng),
             onTap: () => _showTreeDetails(tree),
-            icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              isTargetTree ? BitmapDescriptor.hueRed : hue
+            ),
           );
         }).toSet();
 
@@ -236,18 +399,17 @@ class FarmMapScreenState extends State<FarmMapScreen>
               : "Trees Map"
             ),
         ),
-        backgroundColor: Colors.green[800],
         actions: [
           // Toggle between Farm and Tree view
           Padding(
-            padding: EdgeInsets.symmetric(horizontal: 8.0),
+            padding: EdgeInsets.symmetric(horizontal: AppTheme.spacingSM),
             child: Center(
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
                 ),
-                padding: EdgeInsets.symmetric(horizontal: 4),
+                padding: EdgeInsets.symmetric(horizontal: AppTheme.spacingXS),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -288,30 +450,441 @@ class FarmMapScreenState extends State<FarmMapScreen>
               ),
             ),
           ),
-          IconButton(
-            icon: Icon(Icons.refresh),
-            onPressed: _loadData,
-            tooltip: 'Refresh',
-          ),
-          IconButton(
-            icon: Icon(Icons.logout),
-            onPressed: () {
-              _showLogoutDialog(context);
-            },
-            tooltip: 'Logout',
-          ),
         ],
       ),
-      body: _isLoading
-          ? Center(child: CircularProgressIndicator())
-          : GoogleMap(
-              mapType: MapType.satellite, // Satellite looks great on web
-              initialCameraPosition: _kGooglePlex,
-              markers: _markers,
-              onMapCreated: (GoogleMapController controller) {
-                _controller.complete(controller);
-              },
+      body: Stack(
+        children: [
+          _isLoading
+              ? Center(child: CircularProgressIndicator())
+              : GoogleMap(
+                  mapType: MapType.satellite,
+                  initialCameraPosition: _initialCameraPosition,
+                  markers: _markers,
+                  onMapCreated: (GoogleMapController controller) {
+                    _controller.complete(controller);
+                  },
+                  onTap: _isSelectingTreeLocation && !_showFarms
+                      ? (LatLng location) {
+                          print('Tree location selected: ${location.latitude}, ${location.longitude}');
+                          setState(() {
+                            _selectedTreeLocation = location;
+                            _isSelectingTreeLocation = false; // Exit selection mode
+                          });
+                          // Show tree registration dialog with selected location
+                          _showRegisterTreeDialog(location);
+                        }
+                      : null, // Disable tap handler when not in selection mode
+                ),
+          // Visual indicator when selecting tree location
+          if (_isSelectingTreeLocation && !_showFarms)
+            Positioned(
+              top: 0,
+              left: 0,
+              right: 0,
+              child: Container(
+                padding: EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+                color: Colors.green.withOpacity(0.9),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(Icons.touch_app, color: Colors.white, size: 20),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Tap on the map to select tree location',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    SizedBox(width: 8),
+                    IconButton(
+                      icon: Icon(Icons.close, color: Colors.white),
+                      onPressed: () {
+                        setState(() {
+                          _isSelectingTreeLocation = false;
+                        });
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Location selection cancelled'),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      tooltip: 'Cancel selection',
+                ),
+        ],
+      ),
+              ),
             ),
+        ],
+      ),
+      // Floating Action Button - Show when viewing trees (with or without selected farm)
+      floatingActionButton: !_showFarms
+          ? FloatingActionButton(
+              onPressed: _showRegisterTreeOptions,
+              backgroundColor: Colors.green,
+              child: const Icon(Icons.add, color: Colors.white),
+              tooltip: 'Register New Tree',
+            )
+          : null,
+    );
+  }
+
+  /// Show options to register a tree: Manual form or Map selection
+  void _showRegisterTreeOptions() {
+    showModalBottomSheet(
+      context: context,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        return Container(
+          padding: EdgeInsets.all(AppTheme.spacingMD),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Register New Tree',
+                style: AppTheme.h3,
+              ),
+              SizedBox(height: AppTheme.spacingMD),
+              ListTile(
+                leading: Icon(Icons.edit, color: Colors.blue),
+                title: Text('Manual Registration'),
+                subtitle: Text('Fill in tree details manually'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showRegisterTreeForm();
+                },
+              ),
+              SizedBox(height: AppTheme.spacingSM),
+              ListTile(
+                leading: Icon(Icons.location_on_outlined, color: Colors.red),
+                title: Text('Pick Location on Map'),
+                subtitle: Text('Tap on the map to select tree location'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showSelectLocationOnMap();
+                },
+              ),
+              SizedBox(height: AppTheme.spacingSM),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// Show instructions and enable map location selection
+  void _showSelectLocationOnMap() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Select Tree Location'),
+          content: Text('Tap anywhere on the map to mark where you want to plant the tree.\n\nYou can see all existing trees on the map while selecting.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(context);
+                setState(() {
+                  _isSelectingTreeLocation = true;
+                  _selectedTreeLocation = null;
+                });
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('📍 Tap anywhere on the map to select tree location'),
+                    duration: Duration(seconds: 4),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
+              child: Text('Start Selection'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Show tree registration form with pre-filled location
+  void _showRegisterTreeDialog(LatLng location) {
+    // Cancel selection mode
+    setState(() {
+      _isSelectingTreeLocation = false;
+    });
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) {
+        final TextEditingController treeCodeController = TextEditingController();
+        final TextEditingController blockNameController = TextEditingController();
+        final TextEditingController varietyController = TextEditingController();
+        DateTime selectedDatePlanted = DateTime.now();
+        bool isSubmitting = false;
+
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return Container(
+              padding: EdgeInsets.only(
+                left: 20,
+                right: 20,
+                top: 20,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ✅ Show which farm this tree will be registered to
+                    Container(
+                      padding: EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue[50],
+                        border: Border.all(color: Colors.blue, width: 2),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.apartment, color: Colors.blue),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Farm:',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                                Text(
+                                  _selectedFarm?.name ?? 'Unknown Farm',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.blue,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    Text(
+                      'Register New Tree',
+                      style: AppTheme.h3,
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    Text(
+                      'Location: ${location.latitude.toStringAsFixed(6)}, ${location.longitude.toStringAsFixed(6)}',
+                      style: AppTheme.bodySmall.copyWith(color: Colors.grey),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    TextField(
+                      controller: treeCodeController,
+                      decoration: InputDecoration(
+                        labelText: 'Tree Code',
+                        hintText: 'e.g., A_01, B_05',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.label),
+                      ),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    TextField(
+                      controller: blockNameController,
+                      decoration: InputDecoration(
+                        labelText: 'Block Name',
+                        hintText: 'e.g., Block A, North Section',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.category),
+                      ),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    TextFormField(
+                      controller: varietyController,
+                      decoration: InputDecoration(
+                        labelText: 'Variety',
+                        hintText: 'e.g., BR 25, UF 18, ICS 40',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.nature),
+                      ),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    GestureDetector(
+                      onTap: () async {
+                        final DateTime? picked = await showDatePicker(
+                          context: context,
+                          initialDate: selectedDatePlanted,
+                          firstDate: DateTime(2000),
+                          lastDate: DateTime.now(),
+                          helpText: 'Select Date Planted',
+                        );
+                        if (picked != null && picked != selectedDatePlanted) {
+                          setState(() {
+                            selectedDatePlanted = picked;
+                          });
+                        }
+                      },
+                      child: Container(
+                        padding: EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_today, color: Colors.green),
+                            SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Date Planted',
+                                    style: TextStyle(
+                                      fontSize: 12,
+                                      color: Colors.grey,
+                                    ),
+                                  ),
+                                  Text(
+                                    '${selectedDatePlanted.toLocal().toString().split(' ')[0]}',
+                                    style: TextStyle(
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: 20),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: isSubmitting
+                                ? null
+                                : () => Navigator.pop(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.grey,
+                            ),
+                            child: Text('Cancel'),
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton(
+                            onPressed: isSubmitting
+                                ? null
+                                : () async {
+                                    if (treeCodeController.text.isEmpty) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(SnackBar(
+                                        content: Text('Please enter tree code'),
+                                      ));
+                                      return;
+                                    }
+
+                                    setState(() => isSubmitting = true);
+
+                                    try {
+                                      // Register the tree via API
+                                      await ApiService.registerTree(
+                                        farmId: _selectedFarm?.id ?? 1,
+                                        treeCode: treeCodeController.text,
+                                        blockName: blockNameController.text,
+                                        variety: varietyController.text.trim(),
+                                        latitude: location.latitude,
+                                        longitude: location.longitude,
+                                        datePlanted: selectedDatePlanted.toIso8601String().split('T')[0],
+                                      );
+
+                                      Navigator.pop(context);
+
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          backgroundColor: Colors.green,
+                                          content: Text(
+                                              '✅ Tree registered successfully!'),
+                                        ),
+                                      );
+
+                                      // Reload trees
+                                      _loadData();
+                                    } catch (e) {
+                                      ScaffoldMessenger.of(context)
+                                          .showSnackBar(
+                                        SnackBar(
+                                          backgroundColor: Colors.red,
+                                          content: Text('Error: $e'),
+                                        ),
+                                      );
+                                    }
+
+                                    setState(() => isSubmitting = false);
+                                  },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green,
+                            ),
+                            child: isSubmitting
+                                ? SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      valueColor: AlwaysStoppedAnimation<Color>(
+                                          Colors.white),
+                                    ),
+                                  )
+                                : Text('Register'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  /// Show manual tree registration form
+  void _showRegisterTreeForm() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (context) => _RegisterTreeForm(
+        selectedFarm: _selectedFarm,
+        onTreeRegistered: () {
+                                      _loadData();
+        },
+      ),
     );
   }
 
@@ -323,122 +896,106 @@ class FarmMapScreenState extends State<FarmMapScreen>
           borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return Container(
-          padding: EdgeInsets.all(20),
-          height: 300,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. HEADER
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          farm.name ?? "Unknown Farm",
-                          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        SizedBox(height: 5),
-                        Row(
-                          children: [
-                            Icon(Icons.location_on, size: 16, color: Colors.grey),
-                            SizedBox(width: 5),
-                            Expanded(
-                              child: Text(
-                                farm.location ?? "Location unknown",
-                                style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              Divider(height: 20),
-
-              // 2. FARM DETAILS GRID
-              Row(
-                children: [
-                  _buildInfo("Area", "${farm.area_hectares ?? 0}ha", Icons.landscape),
-                  _buildInfo("Soil Type", farm.soil_type ?? "N/A", Icons.public),
-                  _buildInfo("Coordinates", 
-                    "${farm.latitude?.toStringAsFixed(4) ?? 'N/A'},\n${farm.longitude?.toStringAsFixed(4) ?? 'N/A'}", 
-                    Icons.map),
-                ],
-              ),
-              SizedBox(height: 20),
-
-              // 3. ACTION BUTTON - View Trees
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: Icon(Icons.forest),
-                  label: Text("View Trees in This Farm"),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green[700],
-                    padding: EdgeInsets.symmetric(vertical: 15),
-                  ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                    // Set the selected farm and switch to trees view
-                    setState(() {
-                      _selectedFarm = farm;
-                      _showFarms = false;
-                      _loadData();
-                    });
-                  },
-                ),
-              ),
-              SizedBox(height: 10),
-
-              // 4. CLOSE BUTTON
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text("Close"),
-                ),
-              ),
-            ],
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: 20,
+            bottom: MediaQuery.of(context).viewInsets.bottom + 20,
           ),
-        );
-      },
-    );
-  }
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // 1. HEADER
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            farm.name ?? "Unknown Farm",
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          SizedBox(height: 5),
+                          Row(
+                            children: [
+                              Icon(Icons.location_on, size: 16, color: Colors.grey),
+                              SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  farm.location ?? "Location unknown",
+                                  style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                Divider(height: 20),
 
-  void _showLogoutDialog(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text('Logout'),
-          content: Text('Are you sure you want to logout?'),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
-              child: Text('Cancel'),
+                // 2. FARM DETAILS GRID
+                Row(
+                  children: [
+                    _buildInfo("Area", "${farm.area_hectares ?? 0}ha", Icons.landscape),
+                    SizedBox(width: 8),
+                    _buildInfo("Soil Type", farm.soil_type ?? "N/A", Icons.public),
+                    SizedBox(width: 8),
+                    _buildInfo("Coordinates", 
+                      "${farm.latitude?.toStringAsFixed(4) ?? 'N/A'}, ${farm.longitude?.toStringAsFixed(4) ?? 'N/A'}", 
+                      Icons.map),
+                  ],
+                ),
+                SizedBox(height: 20),
+
+                // 3. ACTION BUTTON - View Trees
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: Icon(Icons.forest),
+                    label: Text("View Trees in This Farm"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.green[700],
+                      padding: EdgeInsets.symmetric(vertical: 15),
+                    ),
+                    onPressed: () {
+                      Navigator.pop(context);
+                      // Set the selected farm and switch to trees view
+                      setState(() {
+                        _selectedFarm = farm;
+                        _showFarms = false;
+                        _loadData();
+                      });
+                    },
+                  ),
+                ),
+                SizedBox(height: AppTheme.spacingSM),
+
+                // 4. CLOSE BUTTON
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: Text("Close"),
+                  ),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () async {
-                await AuthService.logout();
-                Navigator.pop(context);
-                Navigator.pushAndRemoveUntil(
-                  context,
-                  MaterialPageRoute(builder: (context) => LoginPage()),
-                  (route) => false,
-                );
-              },
-              child: Text('Logout', style: TextStyle(color: Colors.red)),
-            ),
-          ],
+          ),
         );
       },
     );
@@ -460,233 +1017,259 @@ class FarmMapScreenState extends State<FarmMapScreen>
 
     String status = "Healthy";
     String lastInspection = "Never Scanned";
-    String podCount = "0";
+    String podCount = "0"; // ✅ Will be set from latest_log
     String? imageUrl;
     String treatment = "No recommendation available."; // ✅ Add this
-
+    
     if (log != null) {
-      // Get specific disease or general status
-      status = log['disease_type'] ?? log['status'] ?? "Issue Reported";
-      lastInspection = log['inspection_date'] ?? "N/A";
+      status = log['status'] ?? log['disease_type'] ?? "Healthy";
+      lastInspection = log['created_at'] ?? "Unknown";
       podCount = log['pod_count']?.toString() ?? "0";
-
-      // Construct Image URL (Replace 127.0.0.1 with your Laravel IP)
-      if (log['image_path'] != null) {
-        imageUrl = "http://127.0.0.1:8000/storage/${log['image_path']}";
-      }
-      
-      // ✅ Get treatment from detection history
-      treatment = _getTreatmentForDisease(status);
+      imageUrl = log['image_url'];
+      treatment = log['treatment_recommendation'] ?? "No recommendation available.";
     }
 
-    // C. Colors
-    Color statusColor = status == "Healthy" ? Colors.green : Colors.red;
-
+    // C. Show Bottom Sheet
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
       builder: (context) {
         return Container(
           padding: EdgeInsets.all(20),
-          height: 500, // Taller to fit image
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // 1. HEADER
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text("Tree: $code",
-                      style:
-                          TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
-                  Chip(
-                    label: Text(status,
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.bold)),
-                    backgroundColor: statusColor,
-                  )
-                ],
-              ),
-              Divider(),
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
+          ),
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // HEADER
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Tree: $code",
+                            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                          ),
+                          SizedBox(height: 5),
+                          Text(
+                            "Block: $block | Variety: $variety",
+                            style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: Icon(Icons.close),
+                      onPressed: () => Navigator.pop(context),
+                    ),
+                  ],
+                ),
+                Divider(height: 20),
 
-              // 2. TREE DETAILS GRID
-              Row(
-                children: [
-                  _buildInfo("Block", block, Icons.grid_view),
-                  _buildInfo("Variety", variety, Icons.eco),
-                  _buildInfo("Planted", planted, Icons.calendar_today),
-                ],
-              ),
-              SizedBox(height: 15),
-
-              // 3. LATEST SCAN SECTION
-              Text("Latest Scan Details",
-                  style: TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.grey[700])),
-              SizedBox(height: 10),
-
-              Row(
-                children: [
-                  _buildInfo("Inspected", lastInspection, Icons.history),
-                  _buildInfo("Pods", podCount, Icons.circle_outlined),
-                ],
-              ),
-              SizedBox(height: 15),
-
-              // 4. TREATMENT RECOMMENDATION (If diseased)
-              if (status != "Healthy")
-                Card(
-                  elevation: 3,
-                  color: Colors.orange[50],
-                  child: Padding(
-                    padding: EdgeInsets.all(15),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+                // STATUS CARD
+                Container(
+                  padding: EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    color: status.toLowerCase().contains('healthy') 
+                        ? Colors.green[50] 
+                        : Colors.orange[50],
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: status.toLowerCase().contains('healthy') 
+                          ? Colors.green 
+                          : Colors.orange,
+                      width: 2,
+                    ),
+                  ),
+                  child: Row(
+                  children: [
+                      Icon(
+                        status.toLowerCase().contains('healthy') 
+                            ? Icons.check_circle 
+                            : Icons.warning,
+                        color: status.toLowerCase().contains('healthy') 
+                            ? Colors.green 
+                            : Colors.orange,
+                        size: 30,
+                      ),
+                      SizedBox(width: 15),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(Icons.local_hospital, color: Colors.orange[800], size: 24),
-                            SizedBox(width: 10),
                             Text(
-                              "Treatment Recommendation",
+                              "Status: $status",
                               style: TextStyle(
-                                fontSize: 14,
+                                fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.orange[800],
+                                color: status.toLowerCase().contains('healthy') 
+                                    ? Colors.green[700] 
+                                    : Colors.orange[700],
                               ),
+                            ),
+                            SizedBox(height: 5),
+                            Text(
+                              "Last Inspection: $lastInspection",
+                              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
                             ),
                           ],
                         ),
-                        SizedBox(height: 10),
-                        Text(
-                          treatment,
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.5,
-                            color: Colors.grey[800],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else
-                Card(
-                  elevation: 3,
-                  color: Colors.green[50],
-                  child: Padding(
-                    padding: EdgeInsets.all(15),
-                    child: Row(
-                      children: [
-                        Icon(Icons.check_circle, color: Colors.green[800], size: 24),
-                        SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            "Tree is healthy. Continue monitoring and maintenance.",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: Colors.green[800],
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
+                SizedBox(height: 20),
 
-              SizedBox(height: 15),
-
-              // 5. IMAGE PREVIEW (If exists)
-              if (imageUrl != null)
-                Expanded(
-                  child: Container(
+                // IMAGE (if available)
+                if (imageUrl != null && imageUrl!.isNotEmpty) ...[
+                  Container(
+                    height: 200,
                     width: double.infinity,
                     decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey.shade300),
-                        image: DecorationImage(
-                            image: NetworkImage(imageUrl), fit: BoxFit.cover)),
-                  ),
-                )
-              else
-                Expanded(
-                  child: Container(
-                    width: double.infinity,
-                    color: Colors.grey[100],
-                    child: Center(
-                        child: Text("No scan image available",
-                            style: TextStyle(color: Colors.grey))),
-                  ),
-                ),
-
-              SizedBox(height: 20),
-
-              // 6. ACTION BUTTONS
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      icon: Icon(Icons.update),
-                      label: Text("Update Pods"),
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        // Show the Update Pods dialog, passing tree id and current pod count
-                        _showUpdatePodsDialog(
-                          context,
-                          treeId,
-                          currentPods,
-                        );
-                      },
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.grey[300]!),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(10),
+                      child: Image.network(
+                        imageUrl!,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) {
+                          return Center(
+                            child: Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                          );
+                        },
+                      ),
                     ),
                   ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      icon: Icon(Icons.camera_alt),
-                      label: Text("Scan Now"),
-                      style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green[700]),
-                      onPressed: () {
-                        Navigator.pop(context);
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                              // Pass the Tree ID to the scanner via route arguments
-                              builder: (context) => DashboardScreen(),
-                              settings: RouteSettings(arguments: tree['id'].toString()),
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-                  SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: () async {
-                        Navigator.pop(context); // Close tree details dialog
-                        final treeId = tree['id'];
-                        final treeIdInt = treeId is int ? treeId : int.tryParse(treeId.toString()) ?? 0;
-                        // Wait a moment for the dialog to close, then show harvest form
-                        await Future.delayed(Duration(milliseconds: 100));
-                        if (mounted) {
-                          _showHarvestForm(treeIdInt);
-                        }
-                      },
-                      icon: const Icon(Icons.agriculture),
-                      label: const Text('Harvest'),
-                      style: ElevatedButton.styleFrom(backgroundColor: Colors.green),
-                    ),
-                  ),
+                  SizedBox(height: 20),
                 ],
-              )
-            ],
+
+                // DETAILS GRID
+                Row(
+                  children: [
+                    _buildInfo("Pods", podCount, Icons.eco),
+                    _buildInfo("Planted", planted.split(' ')[0], Icons.calendar_today),
+                  ],
+                ),
+                SizedBox(height: 20),
+
+                // TREATMENT RECOMMENDATION
+                if (treatment.isNotEmpty && treatment != "No recommendation available.") ...[
+                  Container(
+                    padding: EdgeInsets.all(15),
+                    decoration: BoxDecoration(
+                      color: Colors.blue[50],
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.blue, width: 1),
+                    ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                            Icon(Icons.medical_services, color: Colors.blue),
+                            SizedBox(width: 10),
+                            Text(
+                                  "Treatment Recommendation",
+                              style: TextStyle(
+                                fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                color: Colors.blue[700],
+                                ),
+                              ),
+                            ],
+                          ),
+                        SizedBox(height: 10),
+                          Text(
+                            treatment,
+                          style: TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
+                    ),
+                  SizedBox(height: 20),
+                ],
+
+                // ACTION BUTTONS
+                Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        icon: Icon(Icons.camera_alt),
+                        label: Text("Scan Now"),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.green[700],
+                          padding: EdgeInsets.symmetric(vertical: 15),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (context) => DashboardScreen(),
+                              settings: RouteSettings(arguments: treeId.toString()),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                      child: ElevatedButton.icon(
+                            icon: Icon(Icons.edit),
+                            label: Text("Update Pods"),
+                        style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.blue,
+                              padding: EdgeInsets.symmetric(vertical: 15),
+                            ),
+                        onPressed: () {
+                          Navigator.pop(context);
+                              _showUpdatePodsDialog(context, treeId, currentPods);
+                            },
+                          ),
+                        ),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: Icon(Icons.agriculture),
+                            label: Text("Harvest"),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green[700],
+                              padding: EdgeInsets.symmetric(vertical: 15),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(context);
+                              _showHarvestForm(treeId);
+                        },
+                      ),
+                    ),
+                      ],
+                    ),
+                    SizedBox(height: 10),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text("Close"),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
         );
       },
@@ -746,23 +1329,37 @@ class FarmMapScreenState extends State<FarmMapScreen>
                       Navigator.pop(context); // Close Dialog
 
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(backgroundColor: Colors.green, content: Text("Yield Updated Successfully!"))
+                        SnackBar(
+                          backgroundColor: Colors.green,
+                          content: Text("Pod count updated successfully!"),
+                        ),
                       );
 
-                      // 🔄 REFRESH MAP DATA using provider
-                      context.read<RefreshProvider>().triggerFarmMapRefresh();
+                      // Reload trees to reflect the update
                       _loadData();
-
                     } catch (e) {
-                      setState(() => _isUpdating = false);
                       ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(backgroundColor: Colors.red, content: Text("Error: $e"))
+                        SnackBar(
+                          backgroundColor: Colors.red,
+                          content: Text("Error: $e"),
+                        ),
                       );
+                    } finally {
+                      if (mounted) {
+                        setState(() => _isUpdating = false);
+                      }
                     }
                   },
                   child: _isUpdating
-                    ? SizedBox(width: 15, height: 15, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                    : Text("SAVE"),
+                      ? SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : Text("Save"),
                 ),
               ],
             );
@@ -774,73 +1371,553 @@ class FarmMapScreenState extends State<FarmMapScreen>
 
   // Helper widget
   Widget _buildInfo(String label, String val, IconData icon) {
-    return Expanded(
+    return Flexible(
       child: Column(
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 18, color: Colors.brown[300]),
           SizedBox(height: 4),
           Text(label, style: TextStyle(fontSize: 10, color: Colors.grey)),
-          Text(val,
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-              textAlign: TextAlign.center),
+          SizedBox(height: 2),
+          Text(
+            val,
+            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
+            maxLines: 3,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
   }
 
-  // ✅ Helper method to get treatment recommendation based on disease
-  String _getTreatmentForDisease(String disease) {
-    final d = disease.toLowerCase();
+  void _showHarvestForm(int treeId) {
+    print('DEBUG: _showHarvestForm called with treeId: $treeId');
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => HarvestEntryForm(
+          treeId: treeId,
+        ),
+      ),
+    );
+  }
+}
 
-    if (d.contains('black')) {
-      return "Immediate Action: Remove and bury all infected pods immediately to stop spores from spreading. "
-             "Cultural: Improve air circulation by pruning the tree canopy (reduce shade). Improve drainage in the farm. "
-             "Chemical: Apply Copper-based fungicides (e.g., Bordeaux mixture) every 2-4 weeks during the rainy season.";
-    }
+/// Separate StatefulWidget for tree registration form to properly manage state
+class _RegisterTreeForm extends StatefulWidget {
+  final dynamic selectedFarm;
+  final VoidCallback onTreeRegistered;
 
-    if (d.contains('frosty') || d.contains('roreri')) {
-      return "CRITICAL: Do NOT transport infected pods. Remove pods before the white dust (spores) appears. "
-             "Disposal: Cover infected pods with plastic on the ground or bury them deep to prevent spore release. "
-             "Maintenance: Perform weekly phytosanitary pruning. Fungicides are generally ineffective once infection starts; prevention is key.";
-    }
+  const _RegisterTreeForm({
+    required this.selectedFarm,
+    required this.onTreeRegistered,
+  });
 
-    if (d.contains('witch') || d.contains('broom') || d.contains('perniciosa')) {
-      return "Pruning: Prune and burn all 'broom-like' vegetative shoots (infected branches) and infected pods. "
-             "Timing: Prune during dry periods to reduce reinfection risks. "
-             "Long-term: Consider grafting with resistant clones if the tree is severely affected.";
-    }
+  @override
+  State<_RegisterTreeForm> createState() => _RegisterTreeFormState();
+}
 
-    if (d.contains('borer') || d.contains('carmenta') || d.contains('pod borer')) {
-      return "Mechanical: Implement 'Sleeving' (bagging) of young pods (2-3 months old) using plastic bags to prevent moths from laying eggs. "
-             "Sanitation: Harvest ripe pods regularly. Remove and bury infested pods to kill larvae inside. "
-             "Biological: Encourage natural enemies (ants/wasps) or use pheromone traps.";
-    }
+class _RegisterTreeFormState extends State<_RegisterTreeForm> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController treeCodeController = TextEditingController();
+  final TextEditingController blockNameController = TextEditingController();
+  final TextEditingController varietyController = TextEditingController();
+  final TextEditingController latitudeController = TextEditingController();
+  final TextEditingController longitudeController = TextEditingController();
+  
+  DateTime selectedDatePlanted = DateTime.now();
+  bool isSubmitting = false;
+  bool isGettingLocation = false;
+  dynamic selectedFarmForForm;
+  List<dynamic> farmsList = [];
+  bool isLoadingFarms = false;
 
-    if (d.contains('healthy')) {
-      return "Maintenance: Continue regular monitoring. Ensure proper fertilization (NPK) to maintain tree immunity. "
-             "Prevention: Keep the area around the tree base clean (weeding) and maintain 3x3 meter spacing.";
-    }
-
-    return "Consult an expert or local agricultural technician for specific treatment recommendations.";
+  @override
+  void initState() {
+    super.initState();
+    selectedFarmForForm = widget.selectedFarm;
+    _loadFarms();
   }
 
-  void _showHarvestForm(int treeId) {
-    print('🌾 DEBUG: _showHarvestForm called with treeId: $treeId');
-    showModalBottomSheet(
+  @override
+  void dispose() {
+    treeCodeController.dispose();
+    blockNameController.dispose();
+    varietyController.dispose();
+    latitudeController.dispose();
+    longitudeController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadFarms() async {
+    if (farmsList.isEmpty && !isLoadingFarms) {
+      setState(() {
+        isLoadingFarms = true;
+      });
+      try {
+        final farms = await ApiService.getFarms();
+        setState(() {
+          farmsList = farms;
+          // If no farm selected, use first farm as default
+          if (selectedFarmForForm == null && farms.isNotEmpty) {
+            selectedFarmForForm = farms.first;
+          }
+          isLoadingFarms = false;
+        });
+      } catch (e) {
+        setState(() {
+          isLoadingFarms = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.only(
+        left: 20,
+        right: 20,
+        top: 20,
+        bottom: MediaQuery.of(context).viewInsets.bottom + 20,
+      ),
+      child: Form(
+        key: _formKey,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Farm Selection
+              if (widget.selectedFarm == null) ...[
+                // Show dropdown if no farm is pre-selected
+                isLoadingFarms
+                    ? Padding(
+                        padding: EdgeInsets.all(AppTheme.spacingMD),
+                        child: CircularProgressIndicator(),
+                      )
+                    : DropdownButtonFormField<dynamic>(
+                        value: selectedFarmForForm,
+                        decoration: InputDecoration(
+                          labelText: 'Select Farm *',
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.agriculture),
+                        ),
+                        items: farmsList.map<DropdownMenuItem<dynamic>>((farm) {
+                          return DropdownMenuItem<dynamic>(
+                            value: farm,
+                            child: Text(farm.name ?? 'Unknown Farm'),
+                          );
+                        }).toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            selectedFarmForForm = value;
+                          });
+                        },
+                        validator: (value) {
+                          if (value == null) {
+                            return 'Please select a farm';
+                          }
+                          return null;
+                        },
+                      ),
+                SizedBox(height: AppTheme.spacingMD),
+              ] else ...[
+                // Show selected farm info if already selected
+                Container(
+                  padding: EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.blue[50],
+                    border: Border.all(color: Colors.blue, width: 2),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.apartment, color: Colors.blue),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Farm:',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Colors.grey[600],
+                              ),
+                            ),
+                            Text(
+                              widget.selectedFarm?.name ?? 'Unknown Farm',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                SizedBox(height: AppTheme.spacingMD),
+              ],
+              Text(
+                'Register New Tree - Manual',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 20),
+              TextFormField(
+                controller: treeCodeController,
+                decoration: InputDecoration(
+                  labelText: 'Tree Code *',
+                  hintText: 'e.g., A_01',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.label),
+                ),
+                validator: (value) {
+                  if (value == null || value.trim().isEmpty) {
+                    return 'Please enter tree code';
+                  }
+                  return null;
+                },
+              ),
+              SizedBox(height: AppTheme.spacingMD),
+              TextFormField(
+                controller: blockNameController,
+                decoration: InputDecoration(
+                  labelText: 'Block Name',
+                  hintText: 'e.g., Block A',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.category),
+                ),
+              ),
+              SizedBox(height: AppTheme.spacingMD),
+              TextFormField(
+                controller: varietyController,
+                decoration: InputDecoration(
+                  labelText: 'Variety',
+                  hintText: 'e.g., BR 25, UF 18, ICS 40',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.nature),
+                ),
+              ),
+              SizedBox(height: AppTheme.spacingMD),
+              // GPS Location Section
+              Container(
+                padding: EdgeInsets.all(AppTheme.spacingMD),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(AppTheme.radiusMD),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(Icons.gps_fixed, color: Colors.blue),
+                        SizedBox(width: AppTheme.spacingSM),
+                        Text(
+                          'Location',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                    SizedBox(height: AppTheme.spacingSM),
+                    ElevatedButton.icon(
+                      onPressed: isGettingLocation ? null : () async {
+                        setState(() {
+                          isGettingLocation = true;
+                        });
+                        
+                        try {
+                          // Check permission
+                          LocationPermission permission = await Geolocator.checkPermission();
+                          if (permission == LocationPermission.denied) {
+                            permission = await Geolocator.requestPermission();
+                            if (permission == LocationPermission.denied) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text('Location permissions are denied'),
+                                  backgroundColor: Colors.orange,
+                                ),
+                              );
+                              setState(() {
+                                isGettingLocation = false;
+                              });
+                              return;
+                            }
+                          }
+                          
+                          if (permission == LocationPermission.deniedForever) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Location permissions are permanently denied. Please enable them in settings.'),
+                                backgroundColor: Colors.red,
+                              ),
+                            );
+                            setState(() {
+                              isGettingLocation = false;
+                            });
+                            return;
+                          }
+                          
+                          // Get current position
+                          Position position = await Geolocator.getCurrentPosition(
+                            desiredAccuracy: LocationAccuracy.high,
+                          );
+                          
+                          // Update text fields
+                          setState(() {
+                            latitudeController.text = position.latitude.toStringAsFixed(6);
+                            longitudeController.text = position.longitude.toStringAsFixed(6);
+                            isGettingLocation = false;
+                          });
+                          
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Location captured successfully!'),
+                              backgroundColor: Colors.green,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        } catch (e) {
+                          setState(() {
+                            isGettingLocation = false;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('GPS Error: $e'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      },
+                      icon: isGettingLocation
+                          ? SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Icon(Icons.my_location, size: 20),
+                      label: Text(isGettingLocation ? 'Getting Location...' : 'Get Current Location'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.blue,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    TextFormField(
+                      controller: latitudeController,
+                      keyboardType: TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: 'Latitude *',
+                        hintText: '16.6038',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.location_on),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Latitude is required';
+                        }
+                        final lat = double.tryParse(value);
+                        if (lat == null) {
+                          return 'Invalid latitude';
+                        }
+                        return null;
+                      },
+                    ),
+                    SizedBox(height: AppTheme.spacingMD),
+                    TextFormField(
+                      controller: longitudeController,
+                      keyboardType: TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: 'Longitude *',
+                        hintText: '121.1939',
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.location_on),
+                      ),
+                      validator: (value) {
+                        if (value == null || value.trim().isEmpty) {
+                          return 'Longitude is required';
+                        }
+                        final lng = double.tryParse(value);
+                        if (lng == null) {
+                          return 'Invalid longitude';
+                        }
+                        return null;
+                      },
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: AppTheme.spacingMD),
+              GestureDetector(
+                onTap: () async {
+                  final DateTime? picked = await showDatePicker(
       context: context,
-      isScrollControlled: true,
-      builder: (context) {
-        print('🌾 DEBUG: Building HarvestEntryForm');
-        return HarvestEntryForm(
-          treeId: treeId,
-          onSave: (podCount, date) {
-            print('🌾 FARM_MAP: Harvest logged callback received: $podCount pods');
-            print('🌾 FARM_MAP: About to trigger refresh...');
-            context.read<RefreshProvider>().triggerFarmMapRefresh();
-            print('🌾 FARM_MAP: Refresh triggered!');
-          },
-        );
-      },
+                    initialDate: selectedDatePlanted,
+                    firstDate: DateTime(2000),
+                    lastDate: DateTime.now(),
+                  );
+                  if (picked != null) {
+                    setState(() => selectedDatePlanted = picked);
+                  }
+                },
+                child: Container(
+                  padding: EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: Colors.grey),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.calendar_today, color: Colors.green),
+                      SizedBox(width: 12),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Date Planted',
+                            style: TextStyle(color: Colors.grey, fontSize: 12),
+                          ),
+                          Text(
+                            '${selectedDatePlanted.toLocal().toString().split(' ')[0]}',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isSubmitting
+                          ? null
+                          : () => Navigator.pop(context),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.grey,
+                      ),
+                      child: Text('Cancel'),
+                    ),
+                  ),
+                  SizedBox(width: 10),
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              // Validate form
+                              if (!_formKey.currentState!.validate()) {
+                                return;
+                              }
+
+                              // Validate coordinates are not 0,0
+                              final lat = double.tryParse(latitudeController.text.trim());
+                              final lng = double.tryParse(longitudeController.text.trim());
+                              
+                              if (lat == 0.0 && lng == 0.0) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content: Text('Coordinates cannot be 0,0. Please provide a valid location.'),
+                                  backgroundColor: Colors.orange,
+                                ));
+                                return;
+                              }
+
+                              // Use selectedFarmForForm which can be from dropdown or widget.selectedFarm
+                              final farmToUse = selectedFarmForForm ?? widget.selectedFarm;
+                              
+                              if (farmToUse == null) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(SnackBar(
+                                  content: Text('Please select a farm first'),
+                                  backgroundColor: Colors.orange,
+                                ));
+                                return;
+                              }
+
+                              setState(() => isSubmitting = true);
+
+                              try {
+                                final farmId = farmToUse.id is int 
+                                    ? farmToUse.id 
+                                    : int.tryParse(farmToUse.id.toString());
+                                
+                                if (farmId == null) {
+                                  throw Exception('Invalid farm ID');
+                                }
+
+                                await ApiService.registerTree(
+                                  farmId: farmId,
+                                  treeCode: treeCodeController.text.trim(),
+                                  blockName: blockNameController.text.trim(),
+                                  variety: varietyController.text.trim(),
+                                  latitude: lat!,
+                                  longitude: lng!,
+                                  datePlanted: selectedDatePlanted.toIso8601String().split('T')[0],
+                                );
+
+                                Navigator.pop(context);
+
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: Colors.green,
+                                    content: Text(
+                                        'Tree registered successfully!'),
+                                  ),
+                                );
+
+                                // Callback to reload trees
+                                widget.onTreeRegistered();
+                              } catch (e) {
+                                ScaffoldMessenger.of(context)
+                                    .showSnackBar(
+                                  SnackBar(
+                                    backgroundColor: Colors.red,
+                                    content: Text('Error: $e'),
+                                  ),
+                                );
+                              }
+
+                              setState(() => isSubmitting = false);
+                            },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.green,
+                      ),
+                      child: isSubmitting
+                          ? SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              ),
+                            )
+                          : Text('Register Tree'),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

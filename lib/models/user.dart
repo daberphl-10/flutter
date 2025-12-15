@@ -4,27 +4,35 @@ class User {
   final String middleName;
   final String lastName;
   final String email;
+  final String? role; // 'farmer' or 'admin'
 
   User({
     this.id, 
     required this.firstName, 
     required this.middleName, 
     required this.lastName,
-    required this.email
+    required this.email,
+    this.role,
     });
 
   factory User.fromJson(Map<String, dynamic> json) =>
       User(
         id: json['id'], 
-        firstName: json['firstName'], 
-        middleName: json['middleName'], 
-        lastName: json['lastName'], 
-        email: json['email']
+        firstName: json['firstName'] ?? json['firstname'] ?? '', 
+        middleName: json['middleName'] ?? json['middlename'] ?? '', 
+        lastName: json['lastName'] ?? json['lastname'] ?? '', 
+        email: json['email'] ?? '',
+        role: json['role'],
       );
 
   Map<String, dynamic> toJson() => {
-    "first Name": firstName, 
-    "middle Name": middleName, 
-    "last Name": lastName,
-    "email": email};
+    "firstname": firstName, 
+    "middlename": middleName, 
+    "lastname": lastName,
+    "email": email,
+    "role": role,
+  };
+  
+  bool get isAdmin => role == 'admin';
+  bool get isFarmer => role == 'farmer';
 }

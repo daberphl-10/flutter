@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import '../services/api_service.dart';
 import '../models/program.dart'; // Imports your Farm model
+import '../theme/app_theme.dart';
 
 class RegisterTreeScreen extends StatefulWidget {
   @override
@@ -13,9 +14,23 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
 
   // Text Controllers
   final _codeController = TextEditingController();
-  final _varietyController = TextEditingController();
   final _blockController = TextEditingController();
   final _datePlantedController = TextEditingController();
+  
+  // Variety dropdown
+  String? _selectedVariety;
+  
+  // Variety options
+  final List<String> _varietyOptions = [
+    'BR 25',
+    'UF 18',
+    'ICS 40',
+    'K 1',
+    'K 2',
+    'PBC 123',
+    'W 10',
+    'Unknown / Native',
+  ];
 
   // Function to show the Date Picker
   Future<void> _selectDate(BuildContext context) async {
@@ -117,7 +132,7 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
         treeCode: _codeController.text,
         latitude: _latitude!,
         longitude: _longitude!,
-        variety: _varietyController.text,
+        variety: _selectedVariety,
         blockName: _blockController.text,
         datePlanted: _datePlantedController.text.isNotEmpty
             ? _datePlantedController.text
@@ -146,7 +161,7 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
       appBar: AppBar(
           title: Text("Register New Tree"), backgroundColor: Colors.green[800]),
       body: SingleChildScrollView(
-        padding: EdgeInsets.all(20),
+        padding: EdgeInsets.all(AppTheme.spacingMD),
         child: Form(
           key: _formKey,
           child: Column(
@@ -165,7 +180,7 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
                 }).toList(),
                 onChanged: (val) => setState(() => _selectedFarm = val),
               ),
-              SizedBox(height: 15),
+              SizedBox(height: AppTheme.spacingMD),
 
               // --- TREE INFO ---
               TextFormField(
@@ -175,14 +190,26 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
                     border: OutlineInputBorder()),
                 validator: (v) => v!.isEmpty ? "Required" : null,
               ),
-              SizedBox(height: 15),
-              TextFormField(
-                controller: _varietyController,
+              SizedBox(height: AppTheme.spacingMD),
+              DropdownButtonFormField<String>(
+                value: _selectedVariety,
                 decoration: InputDecoration(
-                    labelText: "Variety (Optional)",
-                    border: OutlineInputBorder()),
+                  labelText: "Variety (Optional)",
+                  border: OutlineInputBorder(),
+                ),
+                items: _varietyOptions.map((String variety) {
+                  return DropdownMenuItem<String>(
+                    value: variety,
+                    child: Text(variety),
+                  );
+                }).toList(),
+                onChanged: (String? newValue) {
+                  setState(() {
+                    _selectedVariety = newValue;
+                  });
+                },
               ),
-              SizedBox(height: 15),
+              SizedBox(height: AppTheme.spacingMD),
               TextFormField(
                 controller: _blockController,
                 decoration: InputDecoration(
@@ -190,9 +217,9 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
                     border: OutlineInputBorder()),
               ),
 
-              SizedBox(height: 25),
+              SizedBox(height: AppTheme.spacingLG),
               Divider(),
-              SizedBox(height: 15),
+              SizedBox(height: AppTheme.spacingMD),
 
               // DATE PICKER INPUT
               TextFormField(
@@ -208,11 +235,11 @@ class _RegisterTreeScreenState extends State<RegisterTreeScreen> {
 
               // --- GPS SECTION ---
               Text("Geolocation",
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-              SizedBox(height: 10),
+                  style: AppTheme.h3),
+              SizedBox(height: AppTheme.spacingSM),
 
               Container(
-                padding: EdgeInsets.all(15),
+                padding: EdgeInsets.all(AppTheme.spacingMD),
                 color: Colors.grey[100],
                 child: Column(
                   children: [
