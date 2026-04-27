@@ -415,6 +415,30 @@ class ApiService {
     }
   }
 
+  /// Regional weather risk advisories for the signed-in farmer (OpenWeather automation).
+  static Future<Map<String, dynamic>> getWeatherAdvisories({int activeHours = 72}) async {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final String token = prefs.getString('token') ?? '';
+    final uri = Uri.parse('$baseUrl/weather/advisories').replace(
+      queryParameters: {'active_hours': activeHours.toString()},
+    );
+    final response = await http.get(
+      uri,
+      headers: {
+        'Accept': 'application/json',
+        'Authorization': 'Bearer $token',
+      },
+    );
+    if (response.statusCode == 200) {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map<String, dynamic>) {
+        return Map<String, dynamic>.from(decoded);
+      }
+      return {'success': true, 'data': [], 'risk_status': 'safe'};
+    }
+    throw Exception('Failed to load weather advisories (${response.statusCode})');
+  }
+
   // Get weather data for a farm
   static Future<Map<String, dynamic>> getWeatherData(int farmId) async {
     final SharedPreferences prefs = await SharedPreferences.getInstance();

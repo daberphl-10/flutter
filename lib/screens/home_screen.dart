@@ -9,6 +9,7 @@ import 'program_list_screen.dart';
 import 'dashboard_screen.dart';
 import 'notifications_screen.dart';
 import 'harvest_logs_screen.dart';
+import '../services/audio_consultant_service.dart';
 
 class HomeScreen extends StatefulWidget {
   @override
@@ -20,6 +21,8 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isLoading = true;
   int _farmsCount = 0;
   List<dynamic> _harvestLogs = [];
+  List<dynamic> _weatherAdvisories = [];
+  String _weatherRiskStatus = 'safe';
 
   @override
   void initState() {
@@ -63,13 +66,31 @@ class _HomeScreenState extends State<HomeScreen> {
         }
         return log;
       }).toList();
+
+      List<dynamic> weatherAdvisories = [];
+      String weatherRisk = 'safe';
+      try {
+        final w = await ApiService.getWeatherAdvisories();
+        weatherAdvisories = List<dynamic>.from(w['data'] ?? []);
+        weatherRisk = w['risk_status']?.toString() ?? 'safe';
+      } catch (e) {
+        print('Weather advisories: $e');
+      }
       
       setState(() {
         _stats = data;
         _farmsCount = farms.length;
         _harvestLogs = enhancedHarvestLogs;
+        _weatherAdvisories = weatherAdvisories;
+        _weatherRiskStatus = weatherRisk;
         _isLoading = false;
       });
+
+      if (weatherRisk != 'safe' && weatherAdvisories.isNotEmpty) {
+        final title = weatherAdvisories.first['title']?.toString() ?? 'Weather Advisory';
+        AudioConsultantService.instance.playWeatherAdvisory(title);
+      }
+      
     } catch (e) {
       print(e);
       setState(() => _isLoading = false);
@@ -83,6 +104,25 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text("Farm Overview"), 
         actions: [
+          StatefulBuilder(
+            builder: (context, setState) {
+              final isEnabled = AudioConsultantService.instance.isConsultantModeEnabled;
+              return IconButton(
+                icon: Icon(isEnabled ? Icons.volume_up : Icons.volume_off),
+                tooltip: "Toggle Audio Consultant",
+                onPressed: () async {
+                  await AudioConsultantService.instance.setConsultantModeEnabled(!isEnabled);
+                  setState(() {});
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(isEnabled ? "Audio Consultant Muted" : "Audio Consultant enabled"),
+                      duration: Duration(seconds: 2),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
           Consumer<NotificationProvider>(
             builder: (context, notificationProvider, _) {
               final unreadCount = notificationProvider.unreadCount;
@@ -170,6 +210,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        _buildWeatherAdvisoryBanner(),
+                        SizedBox(height: AppTheme.spacingMD),
                         // Stats Cards Grid
                         _buildStatsGrid(),
                         
@@ -194,6 +236,144 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
     );
+  }
+
+  /// OpenWeather / Laravel regional risk banner (top of Farm Overview).
+  Widget _buildWeatherAdvisoryBanner() {
+    if (_weatherRiskStatus == 'safe') {
+      return Container(
+        width: double.infinity,
+        padding: EdgeInsets.symmetric(
+          horizontal: AppTheme.spacingMD,
+          vertical: AppTheme.spacingSM + 2,
+        ),
+        decoration: BoxDecoration(
+          color: Color(0xFFE8F5E9),
+          borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+          border: Border.all(color: Color(0xFFC8E6C9)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.check_circle_outline, color: Color(0xFF2E7D32), size: 22),
+            SizedBox(width: AppTheme.spacingSM),
+            Expanded(
+              child: Text(
+                'Weather conditions look favorable for your farm. Keep monitoring pods and canopy health.',
+                style: AppTheme.bodyMedium.copyWith(
+                  color: Color(0xFF1B5E20),
+                  height: 1.35,
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    Map<String, dynamic>? first;
+    if (_weatherAdvisories.isNotEmpty) {
+      final raw = _weatherAdvisories.first;
+      if (raw is Map) {
+        first = Map<String, dynamic>.from(raw);
+      }
+    }
+    final String title = first?['title']?.toString() ??
+        _fallbackWeatherTitle(_weatherRiskStatus);
+    final String body = first?['body']?.toString() ??
+        _fallbackWeatherBody(_weatherRiskStatus);
+
+    final Color bg = _weatherRiskStatus == 'high_fungal' ||
+            _weatherRiskStatus == 'mixed'
+        ? Color(0xFFFFEBEE)
+        : Color(0xFFFFF3E0);
+    final Color border = _weatherRiskStatus == 'high_fungal' ||
+            _weatherRiskStatus == 'mixed'
+        ? Color(0xFFE57373)
+        : Color(0xFFFFB74D);
+    final Color iconColor = _weatherRiskStatus == 'high_fungal' ||
+            _weatherRiskStatus == 'mixed'
+        ? Color(0xFFC62828)
+        : Color(0xFFE65100);
+
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: AppTheme.spacingMD,
+        vertical: AppTheme.spacingSM + 2,
+      ),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+        border: Border.all(color: border),
+        boxShadow: [
+          BoxShadow(
+            color: iconColor.withOpacity(0.12),
+            blurRadius: 8,
+            offset: Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.warning_amber_rounded, color: iconColor, size: 24),
+              SizedBox(width: AppTheme.spacingSM),
+              Expanded(
+                child: Text(
+                  '⚠️ Weather alert: $title',
+                  style: AppTheme.bodyLarge.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF3E2723),
+                    height: 1.3,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: AppTheme.spacingSM),
+          Padding(
+            padding: EdgeInsets.only(left: 24 + AppTheme.spacingSM),
+            child: Text(
+              body,
+              style: AppTheme.bodyMedium.copyWith(
+                color: Color(0xFF4E342E),
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _fallbackWeatherTitle(String status) {
+    switch (status) {
+      case 'high_fungal':
+        return 'High fungal risk (humidity / rain)';
+      case 'elevated_pest':
+        return 'Elevated Cacao Pod Borer risk (dry, warm spell)';
+      case 'mixed':
+        return 'Multiple agro-climatic risks';
+      default:
+        return 'Check field conditions';
+    }
+  }
+
+  String _fallbackWeatherBody(String status) {
+    switch (status) {
+      case 'high_fungal':
+        return 'High humidity and wet conditions can favour black pod and related diseases. Improve drainage, sanitation, and consider fungicide if your agronomist recommends it.';
+      case 'elevated_pest':
+        return 'Dry, warm conditions favour pod borer. Harvest mature pods promptly and remove mummies or damaged pods from the field.';
+      case 'mixed':
+        return 'Monitor both fungal and pest pressure. Follow IPM: sanitation, timely harvest, and products suited to the active risk.';
+      default:
+        return 'Review the latest field weather and act on local extension advice.';
+    }
   }
 
   Widget _buildWelcomeSection() {
@@ -1549,33 +1729,65 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         SizedBox(height: AppTheme.spacingMD),
         
-        // Top Farms and Top Trees in a Row
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(
-              child: _buildRankingCard(
-                "Top Farms",
-                Icons.agriculture,
-                topFarms,
-                (item) => item['farm_name'] ?? 'Unknown',
-                (item) => item['total_pods'] ?? 0,
-                (item) => item['harvest_count'] ?? 0,
-              ),
-            ),
-            SizedBox(width: AppTheme.spacingMD),
-            Expanded(
-              child: _buildRankingCard(
-                "Top Trees",
-                Icons.park,
-                topTrees,
-                (item) => item['tree_code'] ?? 'N/A',
-                (item) => item['total_pods'] ?? 0,
-                (item) => item['harvest_count'] ?? 0,
-                subtitle: (item) => item['farm_name'] ?? '',
-              ),
-            ),
-          ],
+        // Top Farms and Top Trees in a responsive layout
+        LayoutBuilder(
+          builder: (context, constraints) {
+            // On screens smaller than 700px wide, stack vertically
+            if (constraints.maxWidth < 700) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildRankingCard(
+                    "Top Farms",
+                    Icons.agriculture,
+                    topFarms,
+                    (item) => item['farm_name'] ?? 'Unknown',
+                    (item) => item['total_pods'] ?? 0,
+                    (item) => item['harvest_count'] ?? 0,
+                  ),
+                  SizedBox(height: AppTheme.spacingMD),
+                  _buildRankingCard(
+                    "Top Trees",
+                    Icons.park,
+                    topTrees,
+                    (item) => item['tree_code'] ?? 'N/A',
+                    (item) => item['total_pods'] ?? 0,
+                    (item) => item['harvest_count'] ?? 0,
+                    subtitle: (item) => item['farm_name'] ?? '',
+                  ),
+                ],
+              );
+            }
+            
+            // On larger screens, use row layout
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: _buildRankingCard(
+                    "Top Farms",
+                    Icons.agriculture,
+                    topFarms,
+                    (item) => item['farm_name'] ?? 'Unknown',
+                    (item) => item['total_pods'] ?? 0,
+                    (item) => item['harvest_count'] ?? 0,
+                  ),
+                ),
+                SizedBox(width: AppTheme.spacingMD),
+                Expanded(
+                  child: _buildRankingCard(
+                    "Top Trees",
+                    Icons.park,
+                    topTrees,
+                    (item) => item['tree_code'] ?? 'N/A',
+                    (item) => item['total_pods'] ?? 0,
+                    (item) => item['harvest_count'] ?? 0,
+                    subtitle: (item) => item['farm_name'] ?? '',
+                  ),
+                ),
+              ],
+            );
+          },
         ),
       ],
     );

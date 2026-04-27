@@ -1,5 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+import 'package:share_plus/share_plus.dart';
+import 'package:gal/gal.dart';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+import 'package:flutter/rendering.dart';
 import '../services/api_service.dart';
+import '../providers/refresh_provider.dart';
 
 class HarvestEntryForm extends StatefulWidget {
   final int treeId;
@@ -19,12 +27,14 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
   final _formKey = GlobalKey<FormState>();
   final _podCountController = TextEditingController();
   final _rejectPodsController = TextEditingController();
+  final _qrCodeKey = GlobalKey();
   DateTime _selectedDate = DateTime.now();
   double _estimatedDryWeight = 0.0;
   int _currentPodCount = 0;
   int _remainingPods = 0;
   bool _isLoading = true;
   String? _error;
+  bool _isSavingToGallery = false;
 
   @override
   void initState() {
@@ -147,6 +157,62 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
     }
   }
 
+  /// Capture QR code as image and save to gallery
+  Future<void> _saveQrCodeToGallery(String trackingUrl, String? trackingCode) async {
+    if (_isSavingToGallery) return;
+
+    setState(() => _isSavingToGallery = true);
+
+    try {
+      final RenderRepaintBoundary? boundary =
+          _qrCodeKey.currentContext?.findRenderObject() as RenderRepaintBoundary?;
+
+      if (boundary == null) {
+        throw Exception('Could not capture QR code');
+      }
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
+      if (byteData == null) {
+        throw Exception('Could not convert image to bytes');
+      }
+
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      // Save to gallery
+      await Gal.putImageBytes(
+        pngBytes,
+        name: 'AIM-CaD_Harvest_${trackingCode ?? DateTime.now().millisecondsSinceEpoch}.png',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ QR code saved to gallery'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      print('Error saving QR code to gallery: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error saving to gallery: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isSavingToGallery = false);
+      }
+    }
+  }
+
   /// Handle save button press
   void _handleSave() async {
     if (!_formKey.currentState!.validate()) {
@@ -183,22 +249,13 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
         // Show success feedback
         final dryWeight = response['data']?['estimated_dry_weight_kg'] ?? _estimatedDryWeight;
         final remainingPods = response['data']?['remaining_pod_count'] ?? _remainingPods;
+        final trackingUrl = response['data']?['tracking_url']?.toString();
+        final trackingCode = response['data']?['tracking_code']?.toString();
 
-        // Store context before closing widget
-        final scaffoldMessenger = ScaffoldMessenger.of(context);
-        final navigator = Navigator.of(context);
-
-        // Reset form
-        _podCountController.clear();
-        _rejectPodsController.clear();
-        setState(() {
-          _estimatedDryWeight = 0.0;
-          _remainingPods = 0;
-          _selectedDate = DateTime.now();
-        });
-
-        // Close the bottom sheet FIRST (before showing SnackBar)
-        navigator.pop();
+        // Trigger RefreshProvider to update the map and other screens
+        if (mounted) {
+          context.read<RefreshProvider>().triggerFarmMapRefresh();
+        }
 
         // Call callback if provided (after closing the form)
         if (widget.onSave != null) {
@@ -208,20 +265,13 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
           print('HARVEST: onSave callback is NULL!');
         }
 
-        // Show success feedback AFTER the widget is closed
-        // Use Future.delayed to ensure it shows after navigation
-        Future.delayed(Duration(milliseconds: 100), () {
-          scaffoldMessenger.showSnackBar(
-            SnackBar(
-              backgroundColor: Colors.green,
-              duration: const Duration(seconds: 4),
-              content: Text(
-                'Harvested: $podCount pods (${dryWeight.toStringAsFixed(2)} kg)\n📊 Remaining: $remainingPods pods',
-                style: const TextStyle(fontSize: 14),
-              ),
-            ),
-          );
-        });
+        await _showHarvestSuccessDialog(
+          podCount: podCount,
+          dryWeight: (dryWeight as num).toDouble(),
+          remainingPods: remainingPods is num ? remainingPods.toInt() : _remainingPods,
+          trackingUrl: trackingUrl,
+          trackingCode: trackingCode,
+        );
       }
     } catch (e) {
       print('Error saving harvest: $e');
@@ -241,8 +291,180 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
     }
   }
 
-  @override
+  Future<void> _showHarvestSuccessDialog({
+    required int podCount,
+    required double dryWeight,
+    required int remainingPods,
+    String? trackingUrl,
+    String? trackingCode,
+  }) async {
+    if (!mounted) return;
+
+    final navigator = Navigator.of(context);
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return Dialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Title Row
+                Row(
+                  children: const [
+                    Icon(Icons.verified, color: Colors.green, size: 24),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Harvest logged successfully!',
+                        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                
+                // Content
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          '$podCount pods recorded (${dryWeight.toStringAsFixed(2)} kg).',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Remaining pods on tree: $remainingPods',
+                          style: TextStyle(color: Colors.grey[700]),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 14),
+                        if (trackingUrl != null && trackingUrl.isNotEmpty) ...[
+                          RepaintBoundary(
+                            key: _qrCodeKey,
+                            child: Container(
+                              width: 200,
+                              height: 200,
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                border: Border.all(color: Colors.green.shade100),
+                                borderRadius: BorderRadius.circular(14),
+                              ),
+                              child: QrImageView(
+                                data: trackingUrl,
+                                version: QrVersions.auto,
+                                size: 180,
+                                backgroundColor: Colors.white,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          Text(
+                            trackingCode ?? 'Traceability QR ready',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Scan to view bean-to-bar certificate',
+                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                            textAlign: TextAlign.center,
+                          ),
+                        ] else ...[
+                          const Text(
+                            'Tracking link is not available from the server response.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                
+                // Actions
+                Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    if (trackingUrl != null && trackingUrl.isNotEmpty) ...[
+                      TextButton.icon(
+                        onPressed: () async {
+                          await Share.share(
+                            'AIM-CaD Harvest Traceability\n${trackingCode ?? ''}\n$trackingUrl',
+                            subject: 'AIM-CaD Harvest Traceability',
+                          );
+                        },
+                        icon: const Icon(Icons.share),
+                        label: const Text('Share'),
+                      ),
+                      TextButton.icon(
+                        onPressed: _isSavingToGallery
+                            ? null
+                            : () => _saveQrCodeToGallery(trackingUrl, trackingCode),
+                        icon: _isSavingToGallery
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.save_alt),
+                        label: Text(_isSavingToGallery ? 'Saving...' : 'Save QR'),
+                      ),
+                    ],
+                    FilledButton.icon(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      icon: const Icon(Icons.check),
+                      label: const Text('Close'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    // Reset form after confirmation
+    _podCountController.clear();
+    _rejectPodsController.clear();
+    if (mounted) {
+      setState(() {
+        _estimatedDryWeight = 0.0;
+        _remainingPods = 0;
+        _selectedDate = DateTime.now();
+      });
+    }
+
+    // Return to previous screen after dialog close
+    if (mounted) {
+      navigator.pop();
+    }
+  }
+@override
   Widget build(BuildContext context) {
+    // We wrap EVERYTHING in a Scaffold so every state (loading, error, and the form) 
+    // has the required Material background and an AppBar with a Back Button.
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Log Harvest'),
+        backgroundColor: Colors.green[700],
+        foregroundColor: Colors.white,
+      ),
+      body: _buildBodyContent(context),
+    );
+  }
+
+  // I extracted your exact UI logic into this helper method to keep it clean
+  Widget _buildBodyContent(BuildContext context) {
     if (_isLoading) {
       return Center(
         child: Column(
@@ -279,18 +501,13 @@ class _HarvestEntryFormState extends State<HarvestEntryForm> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header
-            Text(
-              'Log Harvest',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(height: 8),
+            // Header (You can remove the "Log Harvest" text here if you want, 
+            // since it's now in the AppBar at the top of the screen)
             Text(
               'Tree #${widget.treeId}',
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: Colors.grey[600],
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: Colors.green[800],
               ),
             ),
             const SizedBox(height: 24),

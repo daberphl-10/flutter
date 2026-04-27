@@ -4,6 +4,7 @@ import '../services/auth_service.dart';
 import '../services/api_service.dart';
 import '../theme/app_theme.dart';
 import '../user/LoginPage.dart';
+import '../services/audio_consultant_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   @override
@@ -21,6 +22,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
 
+  // Accessibility State
+  bool _isConsultantMode = true;
+  String _language = 'fil-PH';
+
   @override
   void initState() {
     super.initState();
@@ -31,9 +36,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final userData = await ApiService.getUserProfile();
       
+      // Initialize Audio Service
+      await AudioConsultantService.instance.initialize();
+      
       setState(() {
         _userData = userData;
         _isLoading = false;
+        _isConsultantMode = AudioConsultantService.instance.isConsultantModeEnabled;
+        _language = AudioConsultantService.instance.languageCode;
       });
       
       // Populate controllers
@@ -60,7 +70,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
       return;
     }
 
-    // Validate form
     if (_firstNameController.text.isEmpty || 
         _lastNameController.text.isEmpty ||
         _emailController.text.isEmpty) {
@@ -118,9 +127,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           content: Text('Are you sure you want to logout?'),
           actions: [
             TextButton(
-              onPressed: () {
-                Navigator.pop(context);
-              },
+              onPressed: () => Navigator.pop(context),
               child: Text('Cancel'),
             ),
             TextButton(
@@ -171,7 +178,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Profile Header
                   Center(
                     child: Column(
                       children: [
@@ -181,40 +187,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: AppTheme.primaryColor.withOpacity(0.1),
-                            border: Border.all(
-                              color: AppTheme.primaryColor,
-                              width: 3,
-                            ),
+                            border: Border.all(color: AppTheme.primaryColor, width: 3),
                           ),
-                          child: Icon(
-                            Icons.person,
-                            size: 50,
-                            color: AppTheme.primaryColor,
-                          ),
+                          child: Icon(Icons.person, size: 50, color: AppTheme.primaryColor),
                         ),
                         SizedBox(height: AppTheme.spacingMD),
                         Text(
                           '${_userData?['firstname'] ?? ''} ${_userData?['lastname'] ?? ''}'.trim(),
-                          style: AppTheme.h2.copyWith(
-                            fontWeight: FontWeight.bold,
-                          ),
+                          style: AppTheme.h2.copyWith(fontWeight: FontWeight.bold),
                         ),
                         SizedBox(height: AppTheme.spacingXS),
                         Container(
-                          padding: EdgeInsets.symmetric(
-                            horizontal: AppTheme.spacingMD,
-                            vertical: AppTheme.spacingXS,
-                          ),
+                          padding: EdgeInsets.symmetric(horizontal: AppTheme.spacingMD, vertical: AppTheme.spacingXS),
                           decoration: BoxDecoration(
                             color: AppTheme.primaryColor.withOpacity(0.1),
                             borderRadius: BorderRadius.circular(AppTheme.radiusFull),
                           ),
                           child: Text(
                             _userData?['role']?.toString().toUpperCase() ?? 'FARMER',
-                            style: AppTheme.bodySmall.copyWith(
-                              color: AppTheme.primaryColor,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: AppTheme.bodySmall.copyWith(color: AppTheme.primaryColor, fontWeight: FontWeight.w600),
                           ),
                         ),
                       ],
@@ -223,78 +214,84 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   
                   SizedBox(height: AppTheme.spacingXL),
                   
-                  // Profile Information
-                  Text(
-                    'Personal Information',
-                    style: AppTheme.h3.copyWith(
-                      fontWeight: FontWeight.bold,
-                    ),
+                  Text('Personal Information', style: AppTheme.h3.copyWith(fontWeight: FontWeight.bold)),
+                  SizedBox(height: AppTheme.spacingMD),
+                  TextFormField(
+                    controller: _firstNameController, enabled: _isEditing,
+                    decoration: InputDecoration(labelText: 'First Name', prefixIcon: Icon(Icons.person_outline)),
                   ),
                   SizedBox(height: AppTheme.spacingMD),
-                  
-                  // First Name
                   TextFormField(
-                    controller: _firstNameController,
-                    enabled: _isEditing,
-                    decoration: InputDecoration(
-                      labelText: 'First Name',
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
+                    controller: _middleNameController, enabled: _isEditing,
+                    decoration: InputDecoration(labelText: 'Middle Name', prefixIcon: Icon(Icons.person_outline)),
                   ),
-                  
                   SizedBox(height: AppTheme.spacingMD),
-                  
-                  // Middle Name
                   TextFormField(
-                    controller: _middleNameController,
-                    enabled: _isEditing,
-                    decoration: InputDecoration(
-                      labelText: 'Middle Name',
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
+                    controller: _lastNameController, enabled: _isEditing,
+                    decoration: InputDecoration(labelText: 'Last Name', prefixIcon: Icon(Icons.person_outline)),
                   ),
-                  
                   SizedBox(height: AppTheme.spacingMD),
-                  
-                  // Last Name
                   TextFormField(
-                    controller: _lastNameController,
-                    enabled: _isEditing,
-                    decoration: InputDecoration(
-                      labelText: 'Last Name',
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
+                    controller: _emailController, enabled: _isEditing, keyboardType: TextInputType.emailAddress,
+                    decoration: InputDecoration(labelText: 'Email', prefixIcon: Icon(Icons.email_outlined)),
                   ),
-                  
                   SizedBox(height: AppTheme.spacingMD),
-                  
-                  // Email
                   TextFormField(
-                    controller: _emailController,
-                    enabled: _isEditing,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: 'Email',
-                      prefixIcon: Icon(Icons.email_outlined),
-                    ),
-                  ),
-                  
-                  SizedBox(height: AppTheme.spacingMD),
-                  
-                  // Phone
-                  TextFormField(
-                    controller: _phoneController,
-                    enabled: _isEditing,
-                    keyboardType: TextInputType.phone,
-                    decoration: InputDecoration(
-                      labelText: 'Phone Number',
-                      prefixIcon: Icon(Icons.phone_outlined),
-                    ),
+                    controller: _phoneController, enabled: _isEditing, keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(labelText: 'Phone Number', prefixIcon: Icon(Icons.phone_outlined)),
                   ),
                   
                   SizedBox(height: AppTheme.spacingXL),
+
+                  // ================= NEW ACCESSIBILITY SECTION =================
+                  Text('Accessibility Settings', style: AppTheme.h3.copyWith(fontWeight: FontWeight.bold)),
+                  SizedBox(height: AppTheme.spacingMD),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceColor,
+                      borderRadius: BorderRadius.circular(AppTheme.radiusLG),
+                      border: Border.all(color: Colors.grey.shade300),
+                    ),
+                    child: Column(
+                      children: [
+                        SwitchListTile(
+                          title: Text("Voice & Haptic Consultant", style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold)),
+                          subtitle: Text("Read alerts and vibrate automatically.", style: AppTheme.bodySmall),
+                          value: _isConsultantMode,
+                          activeColor: AppTheme.primaryColor,
+                          secondary: Icon(Icons.record_voice_over, color: AppTheme.primaryColor),
+                          onChanged: (val) async {
+                            await AudioConsultantService.instance.setConsultantModeEnabled(val);
+                            setState(() => _isConsultantMode = val);
+                          },
+                        ),
+                        Divider(height: 1),
+                        ListTile(
+                          leading: Icon(Icons.language, color: AppTheme.primaryColor),
+                          title: Text("Consultant Language", style: AppTheme.bodyMedium.copyWith(fontWeight: FontWeight.bold)),
+                          trailing: DropdownButton<String>(
+                            value: _language,
+                            underline: SizedBox(),
+                            items: [
+                              DropdownMenuItem(value: 'fil-PH', child: Text("Tagalog")),
+                              DropdownMenuItem(value: 'ilo-PH', child: Text("Ilocano")),
+                              DropdownMenuItem(value: 'en-US', child: Text("English")),
+                            ],
+                            onChanged: (val) async {
+                              if (val != null) {
+                                await AudioConsultantService.instance.setLanguageCode(val);
+                                setState(() => _language = val);
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  // ==========================================================
+
+                  SizedBox(height: AppTheme.spacingXL),
                   
-                  // Logout Button
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -308,7 +305,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                     ),
                   ),
-                  
                   SizedBox(height: AppTheme.spacingMD),
                 ],
               ),
@@ -316,4 +312,3 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 }
-

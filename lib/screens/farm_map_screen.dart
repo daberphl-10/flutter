@@ -165,6 +165,7 @@ class FarmMapScreenState extends State<FarmMapScreen>
     try {
       final farms = await ApiService.getFarms();
 
+      if (!mounted) return;
       setState(() {
         _farms = farms;
         _markers = farms.map<Marker>((farm) {
@@ -221,7 +222,9 @@ class FarmMapScreenState extends State<FarmMapScreen>
       }
     } catch (e) {
       print("Error loading farms: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -229,6 +232,7 @@ class FarmMapScreenState extends State<FarmMapScreen>
     try {
       final trees = await ApiService.getAllMapTrees();
 
+      if (!mounted) return;
       setState(() {
         _trees = trees;
         _markers = trees.map<Marker>((tree) {
@@ -243,21 +247,23 @@ class FarmMapScreenState extends State<FarmMapScreen>
           String status = "Healthy";
 
           if (log != null) {
-            String? diseaseType = log['disease_type']?.toString();
-            String? logStatus = log['status']?.toString();
+            String? diseaseType = log['disease_type']?.toString().trim();
+            String? logStatus = log['status']?.toString().trim();
             
-            // If disease_type exists and is not empty/null/healthy, use it
+            // If disease_type exists and is not empty/null/unknown/healthy, use it
             if (diseaseType != null && 
-                diseaseType.trim().isNotEmpty && 
+                diseaseType.isNotEmpty && 
                 diseaseType.toLowerCase() != 'healthy' &&
-                diseaseType.toLowerCase() != 'null') {
+                diseaseType.toLowerCase() != 'null' &&
+                diseaseType.toLowerCase() != 'unknown') {
               status = diseaseType;
             } 
-            // If disease_type is null/empty/healthy, check status field
+            // If disease_type is null/empty/unknown/healthy, check status field
             else if (logStatus != null && 
-                     logStatus.trim().isNotEmpty &&
+                     logStatus.isNotEmpty &&
                      logStatus.toLowerCase() != 'healthy' &&
-                     logStatus.toLowerCase() != 'null') {
+                     logStatus.toLowerCase() != 'null' &&
+                     logStatus.toLowerCase() != 'unknown') {
               status = logStatus;
             } 
             // Otherwise, tree is healthy
@@ -303,7 +309,9 @@ class FarmMapScreenState extends State<FarmMapScreen>
       });
     } catch (e) {
       print("Error: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -311,6 +319,7 @@ class FarmMapScreenState extends State<FarmMapScreen>
     try {
       final trees = await ApiService.getTreesByFarm(farmId);
 
+      if (!mounted) return;
       setState(() {
         _trees = trees;
         _markers = trees.map<Marker>((tree) {
@@ -324,21 +333,23 @@ class FarmMapScreenState extends State<FarmMapScreen>
           String status = "Healthy";
 
           if (log != null) {
-            String? diseaseType = log['disease_type']?.toString();
-            String? logStatus = log['status']?.toString();
+            String? diseaseType = log['disease_type']?.toString().trim();
+            String? logStatus = log['status']?.toString().trim();
             
-            // If disease_type exists and is not empty/null/healthy, use it
+            // If disease_type exists and is not empty/null/unknown/healthy, use it
             if (diseaseType != null && 
-                diseaseType.trim().isNotEmpty && 
+                diseaseType.isNotEmpty && 
                 diseaseType.toLowerCase() != 'healthy' &&
-                diseaseType.toLowerCase() != 'null') {
+                diseaseType.toLowerCase() != 'null' &&
+                diseaseType.toLowerCase() != 'unknown') {
               status = diseaseType;
             } 
-            // If disease_type is null/empty/healthy, check status field
+            // If disease_type is null/empty/unknown/healthy, check status field
             else if (logStatus != null && 
-                     logStatus.trim().isNotEmpty &&
+                     logStatus.isNotEmpty &&
                      logStatus.toLowerCase() != 'healthy' &&
-                     logStatus.toLowerCase() != 'null') {
+                     logStatus.toLowerCase() != 'null' &&
+                     logStatus.toLowerCase() != 'unknown') {
               status = logStatus;
             } 
             // Otherwise, tree is healthy
@@ -383,7 +394,9 @@ class FarmMapScreenState extends State<FarmMapScreen>
       });
     } catch (e) {
       print("Error loading trees for farm: $e");
-      setState(() => _isLoading = false);
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
@@ -1017,13 +1030,49 @@ class FarmMapScreenState extends State<FarmMapScreen>
 
     String status = "Healthy";
     String lastInspection = "Never Scanned";
-    String podCount = "0"; // ✅ Will be set from latest_log
+    String podCount = "0";
     String? imageUrl;
-    String treatment = "No recommendation available."; // ✅ Add this
+    String treatment = "No recommendation available.";
     
     if (log != null) {
-      status = log['status'] ?? log['disease_type'] ?? "Healthy";
-      lastInspection = log['created_at'] ?? "Unknown";
+      // Extract disease status with same robust logic as markers
+      String? diseaseType = log['disease_type']?.toString().trim();
+      String? logStatus = log['status']?.toString().trim();
+      
+      // If disease_type exists and is not empty/null/unknown/healthy, use it
+      if (diseaseType != null && 
+          diseaseType.isNotEmpty && 
+          diseaseType.toLowerCase() != 'healthy' &&
+          diseaseType.toLowerCase() != 'null' &&
+          diseaseType.toLowerCase() != 'unknown') {
+        status = diseaseType;
+      } 
+      // If disease_type is null/empty/unknown/healthy, check status field
+      else if (logStatus != null && 
+               logStatus.isNotEmpty &&
+               logStatus.toLowerCase() != 'healthy' &&
+               logStatus.toLowerCase() != 'null' &&
+               logStatus.toLowerCase() != 'unknown') {
+        status = logStatus;
+      } 
+      // Otherwise, tree is healthy
+      else {
+        status = "Healthy";
+      }
+      
+      // Extract last inspection date with better formatting
+      String? createdAt = log['created_at']?.toString();
+      if (createdAt != null && createdAt.isNotEmpty && createdAt.toLowerCase() != 'null') {
+        // Format: extract just the date part (YYYY-MM-DD) from ISO format
+        if (createdAt.contains(' ')) {
+          lastInspection = createdAt.split(' ')[0];
+        } else if (createdAt.contains('T')) {
+          lastInspection = createdAt.split('T')[0];
+        } else {
+          lastInspection = createdAt;
+        }
+      }
+      
       podCount = log['pod_count']?.toString() ?? "0";
       imageUrl = log['image_url'];
       treatment = log['treatment_recommendation'] ?? "No recommendation available.";
@@ -1457,18 +1506,22 @@ class _RegisterTreeFormState extends State<_RegisterTreeForm> {
       });
       try {
         final farms = await ApiService.getFarms();
-        setState(() {
-          farmsList = farms;
-          // If no farm selected, use first farm as default
-          if (selectedFarmForForm == null && farms.isNotEmpty) {
-            selectedFarmForForm = farms.first;
-          }
-          isLoadingFarms = false;
-        });
+        if (mounted) {
+          setState(() {
+            farmsList = farms;
+            // If no farm selected, use first farm as default
+            if (selectedFarmForForm == null && farms.isNotEmpty) {
+              selectedFarmForForm = farms.first;
+            }
+            isLoadingFarms = false;
+          });
+        }
       } catch (e) {
-        setState(() {
-          isLoadingFarms = false;
-        });
+        if (mounted) {
+          setState(() {
+            isLoadingFarms = false;
+          });
+        }
       }
     }
   }
